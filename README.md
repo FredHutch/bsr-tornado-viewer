@@ -1,38 +1,32 @@
-# Marimo Viewer: Cirro
-Visualization of data managed in the Cirro data platform
+# Tornado Viewer
+Visual display for tornado plots - Fred Hutch Bioinformatics Shared Resource
 
-The simple [marimo](https://marimo.io) app contained in this repository
-includes the code needed to:
+## Input Data
 
-- Load the Cirro client library
-- Authenticate the user's identity
-- Select the Cirro project containing the data of interest
-- Select the specific dataset to load
-- Select a single file from that dataset
+Each dataset which can be parsed by this app contains:
 
-This provides a starting place for building any type of visualization app
-which loads data stored within the user's Cirro account.
+- One or more binned sequencing depth files (CSV)
+- One metadata table (CSV) with columns for chrom, start, end, peak_id, sample_groups, peak_no, and peak_group
+
+All of those CSV files have the same number of rows.
 
 ## Development
 
 Set up your development environment:
 
 ```
-uv venv
-source .venv/bin/activate
-uv pip install -r requirements.txt
+uv init
+uv add cirro pandas plotly marimo matplotlib
 ```
 
 Launch the app in editable notebook format:
 
 ```
-marimo edit app.py
+bash edit.sh
 ```
 
 Launch the app locally via HTML-WASM
 
 ```
-rm -rf test_build;
-marimo export html-wasm app.py -o test_build --mode run --show-code;
-python -m http.server --directory test_build;
+bash build.sh
 ```

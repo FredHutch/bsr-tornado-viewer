@@ -2,4 +2,4 @@
 
 set -e
 
-marimo edit app.py
+uv run marimo edit app.py

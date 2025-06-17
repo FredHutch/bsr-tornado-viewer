@@ -1,0 +1,13 @@
+[project]
+name = "bsr-tornado-viewer"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "cirro>=1.5.4",
+    "marimo>=0.13.15",
+    "matplotlib>=3.10.3",
+    "pandas>=2.3.0",
+    "plotly>=6.1.2",
+]
