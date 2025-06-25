@@ -367,9 +367,9 @@ def _(dataset_ui, mo, project_ui, read_peak_data):
 
 @app.cell
 def _(data, mo):
-    # Select groups to display
+    # Select sample groups to display
     select_groups = mo.ui.multiselect(
-        label="Groups:",
+        label="Sample Groups:",
         options=list(data.peak_dfs.keys()),
         value=list(data.peak_dfs.keys())
     )
@@ -389,12 +389,26 @@ def _(mo, select_groups):
 
 
 @app.cell
-def _():
-    return
+def _(data, mo):
+    # Select peak groups to display
+    _all_peak_groups = data.metadata['peak_group'].drop_duplicates().sort_values().tolist()
+    select_peaks = mo.ui.multiselect(
+        label="Peak Groups:",
+        options=_all_peak_groups,
+        value=_all_peak_groups
+    )
+    select_peaks
+    return (select_peaks,)
 
 
 @app.cell
-def _():
+def _(mo, select_peaks):
+    if len(select_peaks.value) > 0:
+        select_peaks_md = "- " + '\n- '.join(list(select_peaks.value))
+    else:
+        select_peaks_md = "No groups selected"
+
+    mo.md(select_peaks_md)
     return
 
 
@@ -405,6 +419,7 @@ def _(data, mo):
     params = mo.md("""
     ### Plot Settings
 
+    - {split_peak_groups}
     - {window_size}
     - {clip_quantile}
     - {heatmap_height}
@@ -412,6 +427,10 @@ def _(data, mo):
     - {figure_width},
     - {title_size}
     """).batch(
+        split_peak_groups=mo.ui.checkbox(
+            label="Split Peak Groups:",
+            value=True
+        ),
         window_size=mo.ui.number(
             label="Window Size (bp):",
             start=100,
@@ -458,10 +477,23 @@ def _(data, mo):
 
 
 @app.cell
-def _(Axes, BytesIO, List, PeakData, data, params, pd, plt, select_groups):
+def _(
+    Axes,
+    BytesIO,
+    List,
+    PeakData,
+    data,
+    params,
+    pd,
+    plt,
+    select_groups,
+    select_peaks,
+):
     def plot_data(
         data: PeakData,
         groups: List[str],
+        peaks: List[str],
+        split_peak_groups: bool,
         window_size: int,
         clip_quantile: float,
         heatmap_height: float,
@@ -471,34 +503,42 @@ def _(Axes, BytesIO, List, PeakData, data, params, pd, plt, select_groups):
     ):
         if len(groups) == 0:
             return
+        if len(peaks) == 0:
+            return
 
         half_window = int(window_size / 2.)
 
         fig, axarr = plt.subplots(
-            nrows=2,
-            ncols=len(groups),
-            gridspec_kw=dict(
-                height_ratios=[1 - heatmap_height, heatmap_height],
-                wspace=0.1,
-                hspace=0.1
-            ),
             sharex="all",
             sharey="row",
             figsize=(figure_width, figure_height),
             layout="constrained",
-            squeeze=False
+            squeeze=False,
+            **format_subplots(data, groups, peaks, split_peak_groups, heatmap_height)
         )
 
         for i, group in enumerate(groups):
-            df = data.peak_dfs[group]
+            df = data.peak_dfs[group].loc[
+                data.metadata["peak_group"].isin(peaks)
+            ]
             df.columns = list(range(
                 -half_window,
                 half_window,
                 int(window_size / df.shape[1])
             ))
             axarr[0, i].set_title(group.replace(" ", "\n"), size=title_size)
-            plot_density(df, axarr[0, i])
-            heatmap = plot_heatmap(df, axarr[1, i], clip_quantile)
+
+            if split_peak_groups:
+                for peak_group, peak_group_df in df.groupby(data.metadata["peak_group"]):
+                    plot_density(peak_group_df, axarr[0, i], label=peak_group)
+                    row_ix = peaks.index(peak_group)
+                    assert row_ix is not None
+                    heatmap = plot_heatmap(peak_group_df, axarr[row_ix + 1, i], clip_quantile)
+                    axarr[row_ix + 1, i].set_ylabel(peak_group, rotation=0, horizontalalignment="right")
+            else:
+                plot_density(df, axarr[0, i])
+                heatmap = plot_heatmap(df, axarr[1, i], clip_quantile)
+
             axarr[1, i].set_xticks([0, df.shape[1] / 2., df.shape[1] - 1])
             axarr[1, i].set_xticklabels(
                 [
@@ -509,7 +549,9 @@ def _(Axes, BytesIO, List, PeakData, data, params, pd, plt, select_groups):
                 rotation=90
             )
 
-        fig.colorbar(heatmap, ax=axarr[:, i], shrink=0.6)
+        fig.colorbar(heatmap, location="bottom", ax=axarr[-1, :], fraction=0.9)
+        if split_peak_groups:
+            axarr[0, i].legend(bbox_to_anchor=[1, 1])
 
         buf = BytesIO()
         plt.savefig(buf, format="png")
@@ -520,16 +562,55 @@ def _(Axes, BytesIO, List, PeakData, data, params, pd, plt, select_groups):
         return fig, png_data
 
 
+    def format_subplots(
+        data: PeakData,
+        groups: List[str],
+        peaks: List[str],
+        split_peak_groups: bool,
+        heatmap_height: float,
+    ):
+        if split_peak_groups:
+            # Get the number of peaks in each group
+            peak_group_sizes = data.metadata.groupby("peak_group").apply(len).loc[peaks]
+
+            return dict(
+                nrows=1 + len(peaks),
+                ncols=len(groups),
+                gridspec_kw=dict(
+                    height_ratios=[
+                        1 - heatmap_height,
+                        *[
+                            heatmap_height * peak_group_sizes.loc[peak] / peak_group_sizes.sum()
+                            for peak in peaks
+                        ]
+                    ],
+                    wspace=0.,
+                    hspace=0.
+                )
+            )
+        else:
+            return dict(
+                nrows=2,
+                ncols=len(groups),
+                gridspec_kw=dict(
+                    height_ratios=[1 - heatmap_height, heatmap_height],
+                    wspace=0.,
+                    hspace=0.
+                )
+            )
+
+
     def format_bps(bps: int):
         return f"{bps:,}".replace(",000", "kb")
 
 
     def plot_density(
         df: pd.DataFrame,
-        ax: Axes
+        ax: Axes,
+        label=None
     ):
         density: pd.Series = df.mean().reset_index(drop=True)
-        density.plot(ax=ax)
+        density.plot(ax=ax, label=label)
         axvline(ax, df)
 
 
@@ -562,6 +643,7 @@ def _(Axes, BytesIO, List, PeakData, data, params, pd, plt, select_groups):
     fig, png_data = plot_data(
         data,
         select_groups.value,
+        select_peaks.value,
         **params.value
     )
     return fig, png_data
