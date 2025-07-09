@@ -61,21 +61,20 @@ async def _(micropip, mo, running_in_wasm):
             await micropip.install("boto3==1.37.3")
             await micropip.install("aiobotocore==2.22.0")
             await micropip.install("cirro[pyodide]==1.5.4")
+            await micropip.install("pyBigWig==0.3.24")
 
         from io import StringIO, BytesIO
-        from queue import Queue
-        from time import sleep
-        from typing import Dict, Optional, List
-        import plotly.express as px
+        from typing import Dict, List
         from matplotlib import pyplot as plt
         from matplotlib.axes._axes import Axes
         import pandas as pd
         import numpy as np
         from functools import lru_cache
-        import base64
-        from urllib.parse import quote_plus
+        import pyBigWig
+        import tempfile
+        from scipy import stats
 
-        from cirro import DataPortalLogin, DataPortalDataset
+        from cirro import DataPortalLogin
         from cirro.config import list_tenants
 
         # A patch to the Cirro client library is applied when running in WASM
@@ -86,14 +85,18 @@ async def _(micropip, mo, running_in_wasm):
     return (
         Axes,
         BytesIO,
-        DataPortalDataset,
         DataPortalLogin,
         Dict,
         List,
+        StringIO,
         list_tenants,
         lru_cache,
+        np,
         pd,
         plt,
+        pyBigWig,
+        stats,
+        tempfile,
     )
 
 
@@ -248,154 +251,288 @@ def _(datasets, id_to_name, mo, name_to_id, query_params):
 
 
 @app.cell
-def _(DataPortalDataset, Dict, client, dataset_ui, lru_cache, mo, pd):
-    # Stop if the user has not selected a dataset
-    mo.stop(dataset_ui.value is None)
-
-    # Parse the dataset
-    class PeakData:
-
-        msg: str
-        valid_dataset: bool
-        metadata: pd.DataFrame
-        peak_dfs: Dict[str, pd.DataFrame]
-
-        def __init__(
-            self,
-            ds: DataPortalDataset
-        ):
-            # Read all of the CSV files
-            self.dfs = {}
-            for file in ds.list_files():
-                if file.name.endswith((".csv", ".csv.gz")):
-                    print(f"Reading {file.name}")
-                    try:
-                        self.dfs[file.name.replace("data/", "")] = file.read_csv()
-                    except Exception as e:
-                        self.msg = f"Reading {file.name}\n\n" + str(e)
-                        self.valid_dataset = False
-                        break
-
-            # Find the metadata table
-            if self.has_metadata():
-                if self.has_peak_data():
-                    self.valid_dataset = True
-                    self.msg = f"Read in {len(self.peak_dfs):,} datasets for {self.metadata.shape[0]:,} peaks"
-                else:
-                    self.valid_dataset = False
-                    self.msg = "No peak data found"
-            else:
-                self.valid_dataset = False
-                self.msg = "No metadata file found."
-
-        def has_peak_data(self):
-            self.peak_dfs = {}
-
-            for file_name, df in self.dfs.items():
-                if df.shape[0] == self.metadata.shape[0]:
-                    if all([cname.startswith(("u", "d")) for cname in df.columns.values]):
-                        self.peak_dfs[file_name] = df
-
-            # Do some fancy parsing of the filenames to figure out good labels
-            self.rename_peak_dfs()
-
-            return len(self.peak_dfs) > 0
-
-        def rename_peak_dfs(self):
-            if len(self.peak_dfs) <= 1:
-                return
-
-            # Break up each file into fields
-            fields = {}
-            for file_name in self.peak_dfs:
-                for field in file_name.split("."):
-                    fields[field] = fields.get(field, 0) + 1
-
-            name_map = {}
-            for file_name in self.peak_dfs:
-                unique_fields = " ".join([
-                    field.replace("_", " ")
-                    for field in file_name.split(".")
-                    if fields[field] < len(self.peak_dfs)
-                ])
-                if len(unique_fields) > 0:
-                    name_map[file_name] = unique_fields
-
-            self.peak_dfs = {
-                name_map.get(file_name, file_name): df
-                for file_name, df in self.peak_dfs.items()
-            }
-
-        def has_metadata(self):
-            for df in self.dfs.values():
-                if all([
-                    cname in df.columns.values
-                    for cname in [
-                        "chrom",
-                        "start",
-                        "end",
-                        "peak_id",
-                        "sample_groups",
-                        "peak_no",
-                        "peak_group"
-                    ]
-                ]):
-                    self.metadata = df
-                    return True
-            return False
-
-
+def _(client, lru_cache):
+    # Cached functions for reading from a Cirro dataset
     @lru_cache
-    def read_peak_data(project_id: str, dataset_id: str):
-        return PeakData(
-            (
+    def list_files(project_id: str, dataset_id: str):
+        return [
+            file.name
+            for file in (
                 client
                 .get_project_by_id(project_id)
                 .get_dataset_by_id(dataset_id)
+                .list_files()
             )
+        ]
+
+
+    @lru_cache
+    def read_file(project_id: str, dataset_id: str, file_path: str, **kwargs):
+        return (
+            client
+            .get_project_by_id(project_id)
+            .get_dataset_by_id(dataset_id)
+            .list_files()
+            .get_by_id(file_path)
+            .read(**kwargs)
+        )
+    return list_files, read_file
+
+
+@app.cell
+def _(dataset_ui, list_files, mo, project_ui):
+    # Stop if the user has not selected a dataset
+    mo.stop(dataset_ui.value is None)
+
+    # Get the list of all files in the selected dataset
+    all_files = list_files(project_ui.value, dataset_ui.value)
+    return (all_files,)
+
+
+@app.cell
+def _(all_files):
+    def filter_files(prefix=None, suffix=None, contains=None):
+        return [
+            fn for fn in all_files
+            if
+            (prefix is None or fn.startswith(prefix) or fn.startswith("data/" + prefix))
+            and
+            (suffix is None or fn.endswith(suffix) or fn.endswith("data/" + suffix))
+            and
+            (contains is None or contains in fn)
+        ]
+    return (filter_files,)
+
+
+@app.cell
+def _(filter_files, mo):
+    # Ask the user to select a BED file
+    select_bed = mo.ui.dropdown(
+        label="Select BED file:",
+        options=filter_files(suffix=".bed"),
+        value=filter_files(suffix=".bed")[-1]
+    )
+    select_bed
+    return (select_bed,)
+
+
+@app.cell
+def _(StringIO, dataset_ui, mo, pd, project_ui, read_file, select_bed):
+    # Read in the BED file
+    with mo.status.spinner("Reading BED file..."):
+        bed = pd.read_csv(
+            StringIO(read_file(project_ui.value, dataset_ui.value, select_bed.value)),
+            sep="\t",
+            header=None
+        ).rename(
+            columns=dict(zip(range(5), ['chr', 'start', 'end', 'id', 'peak_group']))
         )
 
-    return PeakData, read_peak_data
+    return (bed,)
 
 
 @app.cell
-def _(dataset_ui, mo, project_ui, read_peak_data):
-    data = read_peak_data(project_ui.value, dataset_ui.value)
-    mo.md(data.msg)
-    return (data,)
-
-
-@app.cell
-def _(data, mo):
-    # Select sample groups to display
-    select_groups = mo.ui.multiselect(
-        label="Sample Groups:",
-        options=list(data.peak_dfs.keys()),
-        value=list(data.peak_dfs.keys())
-    )
-    select_groups
-    return (select_groups,)
-
-
-@app.cell
-def _(mo, select_groups):
-    if len(select_groups.value) > 0:
-        select_groups_md = "- " + '\n- '.join(list(select_groups.value))
-    else:
-        select_groups_md = "No groups selected"
-
-    mo.md(select_groups_md)
+def _(bed, plt):
+    # Show the number of different peak groups
+    bed["peak_group"].value_counts().plot(kind="bar")
+    plt.ylabel("Number of Peaks")
+    plt.xlabel("Peak Group")
     return
 
 
 @app.cell
-def _(data, mo):
+def _(filter_files, mo):
+    # Ask the user to select one or more bigWig files
+    select_bigWigs = mo.ui.multiselect(
+        label="Select bigWig file(s):",
+        options=filter_files(suffix=".bigWig"),
+        value=[]
+    )
+    select_bigWigs
+    return (select_bigWigs,)
+
+
+@app.cell
+def _(download_bigWig, lru_cache, mo):
+    # Read in the select_bigWigs files
+    @lru_cache
+    def read_bigWig(project_id: str, dataset_id: str, fn: str):
+        with mo.status.spinner(f"Reading {fn}..."):
+            return download_bigWig(project_id, dataset_id, fn)
+
+    return (read_bigWig,)
+
+
+@app.cell
+def _(client, lru_cache, pyBigWig, tempfile):
+    @lru_cache
+    def download_bigWig(project_id: str, dataset_id: str, fn: str):
+        with tempfile.TemporaryDirectory() as tmp:
+            (
+                client
+                .get_dataset(project_id, dataset_id)
+                .list_files()
+                .get_by_id(fn)
+                .download(download_location=tmp)
+            )
+            return pyBigWig.open(f"{tmp}/{fn}")
+
+    return (download_bigWig,)
+
+
+@app.cell
+def _(Dict, dataset_ui, project_ui, pyBigWig, read_bigWig, select_bigWigs):
+    bigWigs: Dict[str,pyBigWig.pyBigWig] = {
+        fn: read_bigWig(project_ui.value, dataset_ui.value, fn)
+        for fn in select_bigWigs.value
+    }
+    return (bigWigs,)
+
+
+@app.cell
+def _(mo, select_bigWigs):
+    # Let the user rename and group the wig files
+    mo.stop(len(select_bigWigs.value) == 0)
+    sample_annot_ui = mo.md(
+        """### Dataset Names
+
+    Datasets annotated with the same name will be averaged together.
+
+        """ +
+        '\n'.join([
+            '\n'.join([
+                '{' + kw + '_' + str(sample_ix) + '}'
+                for kw in ['name']
+            ])
+            for sample_ix, sample_name in enumerate(select_bigWigs.value)
+        ])
+    ).batch(**{
+        f"name_{sample_ix}": mo.ui.text(label=sample_name, value=sample_name.split("/")[-1][:-len(".bigWig")], full_width=True)
+        for sample_ix, sample_name in enumerate(select_bigWigs.value)
+    })
+    sample_annot_ui
+    return (sample_annot_ui,)
+
+
+@app.cell
+def _(mo):
+    # Get options for how the windows will be set up
+    window_ui = mo.md("""
+    - {size}
+    - {n_bins}
+    - {ref}
+    - {justification}
+    """).batch(
+        size=mo.ui.number(label="Window Size:", value=2000),
+        n_bins=mo.ui.number(label="Number of Bins:", value=200),
+        ref=mo.ui.dropdown(label="Region Reference Point:", options=["Start", "Middle", "End"], value="Middle"),
+        justification=mo.ui.dropdown(label="Window Justification:", options=["Left", "Center", "Right"], value="Center")
+    )
+    window_ui
+    return (window_ui,)
+
+
+@app.cell
+def _(bed, np, window_ui):
+    # Set up a table with the actual window coordinates
+    def _make_windows(size: int, ref: str, justification: str, **kwargs):
+        if ref == "Start":
+            ref = bed['start']
+        elif ref == "Middle":
+            ref = bed[['start', 'end']].apply(np.mean, axis=1)
+        elif ref == "End":
+            ref = bed['end']
+        else:
+            raise ValueError(f"Did not expect ref == '{ref}'")
+
+        if justification == "Left":
+            start, end = ref, ref + size
+        elif justification == "Center":
+            start, end = ref - (size / 2.), ref + (size / 2)
+        elif justification == "Right":
+            start, end = ref - size, ref
+        else:
+            raise ValueError(f"Did not expect justification == '{justification}'")
+
+        return bed.assign(
+            window_start=start.apply(int),
+            window_end=end.apply(int)
+        )
+
+    windows = _make_windows(**window_ui.value)
+    return (windows,)
+
+
+@app.cell
+def _(
+    Dict,
+    bigWigs: "Dict[str, pyBigWig.pyBigWig]",
+    mo,
+    np,
+    pd,
+    stats,
+    window_ui,
+    windows,
+):
+    # Compute the windows
+    def _get_windows(wig: Dict[str, np.array], r: pd.Series, bar: mo.status.progress_bar, kw: str, n_bins: int, **kwargs):
+        bar.update()
+        return stats.binned_statistic(
+            range(r['window_start'], r['window_end']),
+            np.nan_to_num(wig.values(r['chr'], r['window_start'], r['window_end']), nan=0.0),
+            'mean',
+            bins=n_bins
+        ).statistic
+
+
+    with mo.status.progress_bar(
+        title="Calculating window coverage...",
+        total=len(bigWigs) * windows.shape[0],
+        remove_on_exit=True
+    ) as bar:
+        window_dfs = {
+            kw: pd.DataFrame([
+                _get_windows(wig, r, bar, kw, **window_ui.value)
+                for _, r in windows.iterrows()
+            ], index=windows.index).fillna(0).astype(float)
+            for kw, wig in bigWigs.items()
+        }
+    return (window_dfs,)
+
+
+@app.cell
+def _(mo, sample_annot_ui, window_dfs):
+    # Apply labels for each selected wig file and merge replicates
+    def _merge_window_data(window_dfs, wig_labels):
+        # Make a list of the labels that were applied by the user
+        labels = [wig_labels[f"name_{ix}"] for ix in range(len(window_dfs))]
+
+        merged = {}
+        for label in labels:
+            if label in merged:
+                continue
+            kws = [kw for kw, _label in zip(window_dfs.keys(), labels) if _label == label]
+            if len(kws) == 1:
+                merged[label] = window_dfs[kws[0]]
+            else:
+                merged[label] = sum([window_dfs[kw] for kw in kws]) / len(kws)
+
+        return merged
+
+    with mo.status.spinner("Merging replicates...", remove_on_exit=True):
+        data = _merge_window_data(window_dfs, sample_annot_ui.value)
+
+    return (data,)
+
+
+@app.cell
+def _(mo, windows):
     # Select peak groups to display
-    _all_peak_groups = data.metadata['peak_group'].drop_duplicates().sort_values().tolist()
+    _all_peak_groups = windows['peak_group'].drop_duplicates().sort_values().tolist()
     select_peaks = mo.ui.multiselect(
         label="Peak Groups:",
         options=_all_peak_groups,
-        value=_all_peak_groups
+        value=windows['peak_group'].value_counts().index.values[:1]
     )
     select_peaks
     return (select_peaks,)
@@ -413,42 +550,38 @@ def _(mo, select_peaks):
 
 
 @app.cell
-def _(data, mo):
-    mo.stop(data.valid_dataset is False)
+def _(bigWigs: "Dict[str, pyBigWig.pyBigWig]", data, mo):
+    mo.stop(len(bigWigs) == 0)
 
     params = mo.md("""
     ### Plot Settings
 
     - {split_peak_groups}
-    - {window_size}
-    - {clip_quantile}
+    - {include_samples}
+    - {max_val}
     - {heatmap_height}
     - {figure_height}
     - {figure_width},
     - {title_size}
     """).batch(
+        include_samples=mo.ui.multiselect(
+            label="Include / Reorder Samples:",
+            options=sorted(list(data.keys())),
+            value=sorted(list(data.keys()))
+        ),
         split_peak_groups=mo.ui.checkbox(
             label="Split Peak Groups:",
             value=True
         ),
-        window_size=mo.ui.number(
-            label="Window Size (bp):",
-            start=100,
-            step=100,
-            value=2000
+        max_val=mo.ui.number(
+            label="Maximum Value (Heatmap):",
+            value=50
         ),
         heatmap_height=mo.ui.number(
             label="Heatmap Height Ratio:",
             start=0.1,
             stop=0.9,
             value=0.75
-        ),
-        clip_quantile=mo.ui.number(
-            label="Clip Quantile:",
-            start=0.1,
-            stop=1.0,
-            step=0.01,
-            value=0.8
         ),
         figure_height=mo.ui.number(
             label="Figure Height:",
@@ -480,28 +613,31 @@ def _(data, mo):
 def _(
     Axes,
     BytesIO,
+    Dict,
     List,
-    PeakData,
     data,
     params,
     pd,
     plt,
-    select_groups,
     select_peaks,
+    window_ui,
+    windows,
 ):
     def plot_data(
-        data: PeakData,
-        groups: List[str],
+        data: Dict[str, pd.DataFrame],
         peaks: List[str],
-        split_peak_groups: bool,
         window_size: int,
-        clip_quantile: float,
+        split_peak_groups: bool,
+        include_samples: List[str],
+        max_val: float,
         heatmap_height: float,
         figure_height: int,
         figure_width: int,
         title_size: int
     ):
-        if len(groups) == 0:
+        if len(include_samples) == 0:
+            return
+        if len(data) == 0:
             return
         if len(peaks) == 0:
             return
@@ -514,12 +650,12 @@ def _(
             figsize=(figure_width, figure_height),
             layout="constrained",
             squeeze=False,
-            **format_subplots(data, groups, peaks, split_peak_groups, heatmap_height)
+            **format_subplots(data, include_samples, peaks, split_peak_groups, heatmap_height)
         )
 
-        for i, group in enumerate(groups):
-            df = data.peak_dfs[group].loc[
-                data.metadata["peak_group"].isin(peaks)
+        for i, group in enumerate(include_samples):
+            df = data[group].loc[
+                windows["peak_group"].isin(peaks)
             ]
             df.columns = list(range(
                 -half_window,
@@ -529,15 +665,15 @@ def _(
             axarr[0, i].set_title(group.replace(" ", "\n"), size=title_size)
 
             if split_peak_groups:
-                for peak_group, peak_group_df in df.groupby(data.metadata["peak_group"]):
+                for peak_group, peak_group_df in df.groupby(windows["peak_group"]):
                     plot_density(peak_group_df, axarr[0, i], label=peak_group)
                     row_ix = peaks.index(peak_group)
                     assert row_ix is not None
-                    heatmap = plot_heatmap(peak_group_df, axarr[row_ix + 1, i], clip_quantile)
+                    heatmap = plot_heatmap(peak_group_df, axarr[row_ix + 1, i], max_val)
                     axarr[row_ix + 1, i].set_ylabel(peak_group, rotation=0, horizontalalignment="right")
             else:
                 plot_density(df, axarr[0, i])
-                heatmap = plot_heatmap(df, axarr[1, i], clip_quantile)
+                heatmap = plot_heatmap(df, axarr[1, i])
 
             axarr[1, i].set_xticks([0, df.shape[1] / 2., df.shape[1] - 1])
             axarr[1, i].set_xticklabels(
@@ -563,19 +699,19 @@ def _(
 
 
     def format_subplots(
-        data: PeakData,
-        groups: List[str],
+        data: Dict[str, pd.DataFrame],
+        include_samples: List[str],
         peaks: List[str],
         split_peak_groups: bool,
         heatmap_height: float,
     ):
         if split_peak_groups:
             # Get the number of peaks in each group
-            peak_group_sizes = data.metadata.groupby("peak_group").apply(len).loc[peaks]
+            peak_group_sizes = windows.groupby("peak_group").apply(len).loc[peaks]
 
             return dict(
                 nrows=1 + len(peaks),
-                ncols=len(groups),
+                ncols=len(include_samples),
                 gridspec_kw=dict(
                     height_ratios=[
                         1 - heatmap_height,
@@ -591,7 +727,7 @@ def _(
         else:
             return dict(
                 nrows=2,
-                ncols=len(groups),
+                ncols=len(include_samples),
                 gridspec_kw=dict(
                     height_ratios=[1 - heatmap_height, heatmap_height],
                     wspace=0.,
@@ -617,19 +753,18 @@ def _(
     def plot_heatmap(
         df: pd.DataFrame,
         ax: Axes,
-        clip_quantile: float
+        max_val: float
     ):
+        plot_df = (
+            df
+            .loc[df.sum(axis=1).sort_values(ascending=False).index]
+            .reset_index(drop=True)
+            .clip(upper=max_val)
+        )
         heatmap = ax.imshow(
-            (
-                df
-                .loc[df.sum(axis=1).sort_values(ascending=False).index]
-                .reset_index(drop=True)
-                .clip(
-                    upper=df.quantile(q=clip_quantile).max()
-                )
-            ),
+            plot_df,
             aspect="auto",
-            cmap="RdYlBu"
+            cmap="Blues"
         )
         ax.set_yticks([])
         axvline(ax, df)
@@ -642,8 +777,8 @@ def _(
 
     fig, png_data = plot_data(
         data,
-        select_groups.value,
         select_peaks.value,
+        window_ui.value['size'],
         **params.value
     )
     return fig, png_data
