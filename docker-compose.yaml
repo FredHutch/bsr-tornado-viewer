@@ -1,0 +1,20 @@
+version: '3.3'
+services:
+  bsr-tornado-viewer:
+    image: sc-registry.fredhutch.org/bsr-tornado-viewer:latest
+    networks:
+      - sc-swarm-net
+    deploy:
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.bsr-tornado-viewer.rule=Host(`bsr-tornado-viewer.fredhutch.org`)"
+        - "traefik.http.routers.bsr-tornado-viewer-secured.rule=Host(`bsr-tornado-viewer.fredhutch.org`)"
+        - "traefik.http.routers.bsr-tornado-viewer.entrypoints=web,web-secured"
+        - "traefik.http.services.bsr-tornado-viewer.loadbalancer.server.port=8000" # it seems you always need to give traefik a port so it 'notices' the service
+        - "traefik.http.routers.bsr-tornado-viewer.tls=true"
+
+networks:
+  sc-swarm-net:
+    external: true
