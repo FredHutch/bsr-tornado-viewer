@@ -12,4 +12,4 @@ EXPOSE 8000
 # Start the app
 CMD ["uv", "run", "marimo", "run", "app.py", "--headless", "true", "--port=8000", "--host=0.0.0.0"]
 
-# Automated build will trigger on changes to this specific file
+# Trigger build on 2025-07-10 9:51am

@@ -11,4 +11,5 @@ dependencies = [
     "pandas>=2.3.0",
     "plotly>=6.1.2",
     "pybigwig==0.3.24",
+    "scipy>=1.16.0",
 ]
