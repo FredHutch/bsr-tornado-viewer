@@ -415,8 +415,9 @@ def _(mo, select_bigWigs):
 
 
 @app.cell
-def _(mo):
+def _(client, mo):
     # Get options for how the windows will be set up
+    mo.stop(client is None)
     window_ui = mo.md("""
     - {size}
     - {n_bins}
