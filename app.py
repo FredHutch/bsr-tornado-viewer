@@ -11,7 +11,7 @@ def _(mo):
 
 
 @app.cell
-def _():
+def cirro_dataset_type_filter():
     # Define the types of datasets which can be read in
     # This is used to filter the dataset selector, below
     cirro_dataset_type_filter = ["custom_dataset"]
@@ -19,14 +19,14 @@ def _():
 
 
 @app.cell
-def _():
+def import_marimo():
     # Load the marimo library in a dedicated cell for efficiency
     import marimo as mo
     return (mo,)
 
 
 @app.cell
-def _():
+def running_in_wasm():
     # If the script is running in WASM (instead of local development mode), load micropip
     import sys
     if "pyodide" in sys.modules:
@@ -39,7 +39,7 @@ def _():
 
 
 @app.cell
-async def _(micropip, mo, running_in_wasm):
+async def loading_dependencies(micropip, mo, running_in_wasm):
     with mo.status.spinner("Loading dependencies"):
         # If we are running in WASM, some dependencies need to be set up appropriately.
         # This is really just aligning the needs of the app with the default library versions
@@ -108,7 +108,7 @@ def _(mo):
 
 
 @app.cell
-def _(list_tenants):
+def def_domain_to_name(list_tenants):
     # Get the tenants (organizations) available in Cirro
     tenants_by_name = {i["displayName"]: i for i in list_tenants()}
     tenants_by_domain = {i["domain"]: i for i in list_tenants()}
@@ -137,7 +137,7 @@ def _(mo):
 
 
 @app.cell
-def _(domain_to_name, mo, query_params, tenants_by_name):
+def domain_ui(domain_to_name, mo, query_params, tenants_by_name):
     # Let the user select which tenant to log in to (using displayName)
     domain_ui = mo.ui.dropdown(
         options=tenants_by_name,
@@ -150,7 +150,7 @@ def _(domain_to_name, mo, query_params, tenants_by_name):
 
 
 @app.cell
-def _(DataPortalLogin, domain_ui, get_client, mo):
+def cirro_login_ui(DataPortalLogin, domain_ui, get_client, mo):
     # If the user is not yet logged in, and a domain is selected, then give the user instructions for logging in
     # The configuration of this cell and the two below it serve the function of:
     #   1. Showing the user the login instructions if they have selected a Cirro domain
@@ -170,14 +170,14 @@ def _(DataPortalLogin, domain_ui, get_client, mo):
 
 
 @app.cell
-def _(cirro_login, set_client):
+def set_client(cirro_login, set_client):
     # Once the user logs in, set the state for the client object
     set_client(cirro_login.await_completion())
     return
 
 
 @app.cell
-def _(get_client, mo):
+def get_client(get_client, mo):
     # Get the Cirro client object (but only take action if the user selected Cirro as the input)
     client = get_client()
     mo.stop(client is None)
@@ -185,7 +185,7 @@ def _(get_client, mo):
 
 
 @app.cell
-def _():
+def def_id_to_name():
     # Helper functions for dealing with lists of objects that may be accessed by id or name
     def id_to_name(obj_list: list, id: str) -> str:
         if obj_list is not None:
@@ -201,7 +201,7 @@ def _():
 
 
 @app.cell
-def _(client):
+def list_projects(client):
     # Set the list of projects available to the user
     projects = client.list_projects()
     projects.sort(key=lambda i: i.name)
@@ -209,7 +209,7 @@ def _(client):
 
 
 @app.cell
-def _(id_to_name, mo, name_to_id, projects, query_params):
+def project_ui(id_to_name, mo, name_to_id, projects, query_params):
     # Let the user select which project to get data from
     project_ui = mo.ui.dropdown(
         label="Project:",
@@ -222,7 +222,7 @@ def _(id_to_name, mo, name_to_id, projects, query_params):
 
 
 @app.cell
-def _(cirro_dataset_type_filter, client, mo, project_ui):
+def list_datasets(cirro_dataset_type_filter, client, mo, project_ui):
     # Stop if the user has not selected a project
     mo.stop(project_ui.value is None)
 
@@ -238,7 +238,7 @@ def _(cirro_dataset_type_filter, client, mo, project_ui):
 
 
 @app.cell
-def _(datasets, id_to_name, mo, name_to_id, query_params):
+def dataset_ui(datasets, id_to_name, mo, name_to_id, query_params):
     # Let the user select which dataset to get data from
     dataset_ui = mo.ui.dropdown(
         label="Dataset:",
@@ -251,7 +251,7 @@ def _(datasets, id_to_name, mo, name_to_id, query_params):
 
 
 @app.cell
-def _(client, lru_cache):
+def def_list_files(client, lru_cache):
     # Cached functions for reading from a Cirro dataset
     @lru_cache
     def list_files(project_id: str, dataset_id: str):
@@ -280,7 +280,7 @@ def _(client, lru_cache):
 
 
 @app.cell
-def _(dataset_ui, list_files, mo, project_ui):
+def list_files(dataset_ui, list_files, mo, project_ui):
     # Stop if the user has not selected a dataset
     mo.stop(dataset_ui.value is None)
 
@@ -290,7 +290,7 @@ def _(dataset_ui, list_files, mo, project_ui):
 
 
 @app.cell
-def _(all_files):
+def def_filter_files(all_files):
     def filter_files(prefix=None, suffix=None, contains=None):
         return [
             fn for fn in all_files
@@ -305,7 +305,13 @@ def _(all_files):
 
 
 @app.cell
-def _(filter_files, mo):
+def _(mo):
+    mo.md(r"""### Select Regions (BED)""")
+    return
+
+
+@app.cell
+def select_bed(filter_files, mo):
     # Ask the user to select a BED file
     select_bed = mo.ui.dropdown(
         label="Select BED file:",
@@ -317,7 +323,15 @@ def _(filter_files, mo):
 
 
 @app.cell
-def _(StringIO, dataset_ui, mo, pd, project_ui, read_file, select_bed):
+def read_bed_file(
+    StringIO,
+    dataset_ui,
+    mo,
+    pd,
+    project_ui,
+    read_file,
+    select_bed,
+):
     # Read in the BED file
     with mo.status.spinner("Reading BED file..."):
         bed = pd.read_csv(
@@ -332,7 +346,7 @@ def _(StringIO, dataset_ui, mo, pd, project_ui, read_file, select_bed):
 
 
 @app.cell
-def _(bed, plt):
+def plot_peak_groups(bed, plt):
     # Show the number of different peak groups
     bed["peak_group"].value_counts().plot(kind="bar")
     plt.ylabel("Number of Peaks")
@@ -341,7 +355,13 @@ def _(bed, plt):
 
 
 @app.cell
-def _(filter_files, mo):
+def _(mo):
+    mo.md(r"""### Select Genome Coverage Tracks""")
+    return
+
+
+@app.cell
+def select_bigwigs(filter_files, mo):
     # Ask the user to select one or more bigWig files
     select_bigWigs = mo.ui.multiselect(
         label="Select bigWig file(s):",
@@ -353,7 +373,7 @@ def _(filter_files, mo):
 
 
 @app.cell
-def _(download_bigWig, lru_cache, mo):
+def def_read_bigwig(download_bigWig, lru_cache, mo):
     # Read in the select_bigWigs files
     @lru_cache
     def read_bigWig(project_id: str, dataset_id: str, fn: str):
@@ -364,7 +384,7 @@ def _(download_bigWig, lru_cache, mo):
 
 
 @app.cell
-def _(client, lru_cache, pyBigWig, tempfile):
+def def_download_bigwig(client, lru_cache, pyBigWig, tempfile):
     @lru_cache
     def download_bigWig(project_id: str, dataset_id: str, fn: str):
         with tempfile.TemporaryDirectory() as tmp:
@@ -381,7 +401,14 @@ def _(client, lru_cache, pyBigWig, tempfile):
 
 
 @app.cell
-def _(Dict, dataset_ui, project_ui, pyBigWig, read_bigWig, select_bigWigs):
+def read_bigwigs(
+    Dict,
+    dataset_ui,
+    project_ui,
+    pyBigWig,
+    read_bigWig,
+    select_bigWigs,
+):
     bigWigs: Dict[str,pyBigWig.pyBigWig] = {
         fn: read_bigWig(project_ui.value, dataset_ui.value, fn)
         for fn in select_bigWigs.value
@@ -390,35 +417,12 @@ def _(Dict, dataset_ui, project_ui, pyBigWig, read_bigWig, select_bigWigs):
 
 
 @app.cell
-def _(mo, select_bigWigs):
-    # Let the user rename and group the wig files
-    mo.stop(len(select_bigWigs.value) == 0)
-    sample_annot_ui = mo.md(
-        """### Dataset Names
-
-    Datasets annotated with the same name will be averaged together.
-
-        """ +
-        '\n'.join([
-            '\n'.join([
-                '{' + kw + '_' + str(sample_ix) + '}'
-                for kw in ['name']
-            ])
-            for sample_ix, sample_name in enumerate(select_bigWigs.value)
-        ])
-    ).batch(**{
-        f"name_{sample_ix}": mo.ui.text(label=sample_name, value=sample_name.split("/")[-1][:-len(".bigWig")], full_width=True)
-        for sample_ix, sample_name in enumerate(select_bigWigs.value)
-    })
-    sample_annot_ui
-    return (sample_annot_ui,)
-
-
-@app.cell
-def _(client, mo):
+def window_ui(mo, select_bigWigs):
     # Get options for how the windows will be set up
-    mo.stop(client is None)
+    mo.stop(len(select_bigWigs.value) == 0)
     window_ui = mo.md("""
+    ### Set Window Size / Position
+
     - {size}
     - {n_bins}
     - {ref}
@@ -427,14 +431,14 @@ def _(client, mo):
         size=mo.ui.number(label="Window Size:", value=2000),
         n_bins=mo.ui.number(label="Number of Bins:", value=200),
         ref=mo.ui.dropdown(label="Region Reference Point:", options=["Start", "Middle", "End"], value="Middle"),
-        justification=mo.ui.dropdown(label="Window Justification:", options=["Left", "Center", "Right"], value="Center")
+        justification=mo.ui.dropdown(label="Window Justification:", options=["Left", "Center", "Right"], value="Center"),
     )
     window_ui
     return (window_ui,)
 
 
 @app.cell
-def _(bed, np, window_ui):
+def make_windows(bed, np, window_ui):
     # Set up a table with the actual window coordinates
     def _make_windows(size: int, ref: str, justification: str, **kwargs):
         if ref == "Start":
@@ -465,7 +469,7 @@ def _(bed, np, window_ui):
 
 
 @app.cell
-def _(
+def get_windows(
     Dict,
     bigWigs: "Dict[str, pyBigWig.pyBigWig]",
     mo,
@@ -476,14 +480,37 @@ def _(
     windows,
 ):
     # Compute the windows
-    def _get_windows(wig: Dict[str, np.array], r: pd.Series, bar: mo.status.progress_bar, kw: str, n_bins: int, **kwargs):
+    def _get_window(wig: Dict[str, np.array], r: pd.Series, bar: mo.status.progress_bar, kw: str, n_bins: int, **kwargs):
         bar.update()
-        return stats.binned_statistic(
-            range(r['window_start'], r['window_end']),
-            np.nan_to_num(wig.values(r['chr'], r['window_start'], r['window_end']), nan=0.0),
-            'mean',
-            bins=n_bins
-        ).statistic
+        try:
+            return stats.binned_statistic(
+                range(r['window_start'], r['window_end']),
+                np.nan_to_num(wig.values(r['chr'], r['window_start'], r['window_end']), nan=0.0),
+                'mean',
+                bins=n_bins
+            ).statistic
+        except Exception as e:
+            print(r)
+            raise e
+
+
+    def _get_windows(kw: str, wig):
+
+        # Get the chromosome lengths
+        chrlens = wig.chroms()
+
+        # Filter down to the valid windows which are contained within the available chromosomes
+        _windows = windows.loc[
+            windows.apply(
+                lambda r: chrlens.get(r['chr'], 0) >= r['window_end'] and r['window_start'] > 0,
+                axis=1
+            )
+        ]
+
+        return pd.DataFrame([
+            _get_window(wig, r, bar, kw, **window_ui.value)
+            for _, r in _windows.iterrows()
+        ], index=_windows.index).fillna(0).astype(float)
 
 
     with mo.status.progress_bar(
@@ -492,13 +519,35 @@ def _(
         remove_on_exit=True
     ) as bar:
         window_dfs = {
-            kw: pd.DataFrame([
-                _get_windows(wig, r, bar, kw, **window_ui.value)
-                for _, r in windows.iterrows()
-            ], index=windows.index).fillna(0).astype(float)
+            kw: _get_windows(kw, wig)
             for kw, wig in bigWigs.items()
         }
     return (window_dfs,)
+
+
+@app.cell
+def sample_annot_ui(mo, select_bigWigs, windows):
+    # Let the user rename and group the wig files
+    mo.stop(windows is None)
+    sample_annot_ui = mo.md(
+        """### Dataset Names
+
+    Datasets annotated with the same name will be averaged together.
+
+        """ +
+        '\n'.join([
+            '\n'.join([
+                '{' + kw + '_' + str(sample_ix) + '}'
+                for kw in ['name']
+            ])
+            for sample_ix, sample_name in enumerate(select_bigWigs.value)
+        ])
+    ).batch(**{
+        f"name_{sample_ix}": mo.ui.text(label=sample_name, value=sample_name.split("/")[-1][:-len(".bigWig")], full_width=True)
+        for sample_ix, sample_name in enumerate(select_bigWigs.value)
+    })
+    sample_annot_ui
+    return (sample_annot_ui,)
 
 
 @app.cell
@@ -527,43 +576,19 @@ def _(mo, sample_annot_ui, window_dfs):
 
 
 @app.cell
-def _(mo, windows):
-    # Select peak groups to display
-    _all_peak_groups = windows['peak_group'].drop_duplicates().sort_values().tolist()
-    select_peaks = mo.ui.multiselect(
-        label="Peak Groups:",
-        options=_all_peak_groups,
-        value=windows['peak_group'].value_counts().index.values[:1]
-    )
-    select_peaks
-    return (select_peaks,)
-
-
-@app.cell
-def _(mo, select_peaks):
-    if len(select_peaks.value) > 0:
-        select_peaks_md = "- " + '\n- '.join(list(select_peaks.value))
-    else:
-        select_peaks_md = "No groups selected"
-
-    mo.md(select_peaks_md)
-    return
-
-
-@app.cell
 def _(bigWigs: "Dict[str, pyBigWig.pyBigWig]", data, mo):
     mo.stop(len(bigWigs) == 0)
 
     params = mo.md("""
     ### Plot Settings
 
-    - {split_peak_groups}
     - {include_samples}
     - {max_val}
     - {heatmap_height}
     - {figure_height}
     - {figure_width},
     - {title_size}
+    - {split_peak_groups}
     """).batch(
         include_samples=mo.ui.multiselect(
             label="Include / Reorder Samples:",
@@ -611,6 +636,37 @@ def _(bigWigs: "Dict[str, pyBigWig.pyBigWig]", data, mo):
 
 
 @app.cell
+def _(mo, params, windows):
+    # Select peak groups to display
+    if params.value["split_peak_groups"]:
+        select_peaks = mo.md("{groups}").batch(
+            groups=mo.ui.multiselect(
+                label="Peak Groups:",
+                options=windows['peak_group'].value_counts().index.values,
+                value=windows['peak_group'].value_counts().index.values[:1]
+            )
+        )
+    else:
+        select_peaks = mo.md("").batch()
+    select_peaks
+    return (select_peaks,)
+
+
+@app.cell
+def _(mo, params, select_peaks):
+    if len(select_peaks.value) > 0:
+        select_peaks_md = "- " + '\n- '.join(list(select_peaks.value))
+    else:
+        if params.value["split_peak_groups"]:
+            select_peaks_md = "No groups selected"
+        else:
+            select_peaks_md = ""
+
+    mo.md(select_peaks_md)
+    return
+
+
+@app.cell
 def _(
     Axes,
     BytesIO,
@@ -640,7 +696,7 @@ def _(
             return
         if len(data) == 0:
             return
-        if len(peaks) == 0:
+        if split_peak_groups and len(peaks) == 0:
             return
 
         half_window = int(window_size / 2.)
@@ -655,9 +711,12 @@ def _(
         )
 
         for i, group in enumerate(include_samples):
-            df = data[group].loc[
-                windows["peak_group"].isin(peaks)
-            ]
+            if split_peak_groups:
+                df = data[group].loc[
+                    windows["peak_group"].isin(peaks)
+                ]
+            else:
+                df = data[group]
             df.columns = list(range(
                 -half_window,
                 half_window,
@@ -674,7 +733,7 @@ def _(
                     axarr[row_ix + 1, i].set_ylabel(peak_group, rotation=0, horizontalalignment="right")
             else:
                 plot_density(df, axarr[0, i])
-                heatmap = plot_heatmap(df, axarr[1, i])
+                heatmap = plot_heatmap(df, axarr[1, i], max_val)
 
             axarr[1, i].set_xticks([0, df.shape[1] / 2., df.shape[1] - 1])
             axarr[1, i].set_xticklabels(
@@ -776,12 +835,16 @@ def _(
         ax.axvline(x=df.shape[1] / 2., linestyle="--", color="black", alpha=0.5)
 
 
-    fig, png_data = plot_data(
+    _plot_data = plot_data(
         data,
-        select_peaks.value,
+        select_peaks.value.get("groups", []),
         window_ui.value['size'],
         **params.value
     )
+    if _plot_data is None:
+        fig, png_data = None, None
+    else:
+        fig, png_data = _plot_data
     return fig, png_data
 
 
