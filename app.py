@@ -417,7 +417,37 @@ def read_bigwigs(
 
 
 @app.cell
-def window_ui(mo, select_bigWigs):
+def _(mo):
+    # Cache params in the state
+    get_size, set_size = mo.state(2000)
+    get_n_bins, set_n_bins = mo.state(200)
+    get_ref, set_ref = mo.state("Middle")
+    get_justification, set_justification = mo.state("Center")
+    return (
+        get_justification,
+        get_n_bins,
+        get_ref,
+        get_size,
+        set_justification,
+        set_n_bins,
+        set_ref,
+        set_size,
+    )
+
+
+@app.cell
+def window_ui(
+    get_justification,
+    get_n_bins,
+    get_ref,
+    get_size,
+    mo,
+    select_bigWigs,
+    set_justification,
+    set_n_bins,
+    set_ref,
+    set_size,
+):
     # Get options for how the windows will be set up
     mo.stop(len(select_bigWigs.value) == 0)
     window_ui = mo.md("""
@@ -428,10 +458,10 @@ def window_ui(mo, select_bigWigs):
     - {ref}
     - {justification}
     """).batch(
-        size=mo.ui.number(label="Window Size:", value=2000),
-        n_bins=mo.ui.number(label="Number of Bins:", value=200),
-        ref=mo.ui.dropdown(label="Region Reference Point:", options=["Start", "Middle", "End"], value="Middle"),
-        justification=mo.ui.dropdown(label="Window Justification:", options=["Left", "Center", "Right"], value="Center"),
+        size=mo.ui.number(label="Window Size:", value=get_size(), on_change=set_size),
+        n_bins=mo.ui.number(label="Number of Bins:", value=get_n_bins(), on_change=set_n_bins),
+        ref=mo.ui.dropdown(label="Region Reference Point:", options=["Start", "Middle", "End"], value=get_ref(), on_change=set_ref),
+        justification=mo.ui.dropdown(label="Window Justification:", options=["Left", "Center", "Right"], value=get_justification(), on_change=set_justification),
     )
     window_ui
     return (window_ui,)
@@ -636,14 +666,21 @@ def _(bigWigs: "Dict[str, pyBigWig.pyBigWig]", data, mo):
 
 
 @app.cell
-def _(mo, params, windows):
+def _(mo, windows):
+    get_peak_groups, set_peak_groups = mo.state(windows['peak_group'].value_counts().index.values[:1])
+    return get_peak_groups, set_peak_groups
+
+
+@app.cell
+def _(get_peak_groups, mo, params, set_peak_groups, windows):
     # Select peak groups to display
     if params.value["split_peak_groups"]:
         select_peaks = mo.md("{groups}").batch(
             groups=mo.ui.multiselect(
                 label="Peak Groups:",
                 options=windows['peak_group'].value_counts().index.values,
-                value=windows['peak_group'].value_counts().index.values[:1]
+                value=get_peak_groups(),
+                on_change=set_peak_groups
             )
         )
     else:
