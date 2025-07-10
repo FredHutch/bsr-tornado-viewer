@@ -1,12 +1,12 @@
 import marimo
 
 __generated_with = "0.13.15"
-app = marimo.App(width="medium", app_title="Marimo Viewer: Cirro")
+app = marimo.App(width="medium", app_title="Tornado Viewer")
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""# Cut and Run: Tornado Viewer""")
+    mo.md(r"""# Fred Hutch Bioinformatics Core: Tornado Viewer""")
     return
 
 
