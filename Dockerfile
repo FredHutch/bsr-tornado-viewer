@@ -10,6 +10,6 @@ RUN uv sync --locked
 EXPOSE 8000
 
 # Start the app
-CMD ["uv", "run", "marimo", "run", "app.py", "--headless", "true", "--port=8000", "--host=0.0.0.0"]
+CMD ["uv", "run", "marimo", "run", "app.py", "--headless", "true", "--port=8000", "--host=0.0.0.0", "--redirect-console-to-browser"]
 
 # Trigger build on 2025-07-10 10:47am
