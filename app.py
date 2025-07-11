@@ -323,32 +323,26 @@ def select_bed(filter_files, mo):
 
 
 @app.cell
-def read_bed_file(
-    StringIO,
-    dataset_ui,
-    mo,
-    pd,
-    project_ui,
-    read_file,
-    select_bed,
-):
+def read_bed_file(StringIO, lru_cache, mo, pd, read_file):
     # Read in the BED file
-    with mo.status.spinner("Reading BED file..."):
-        bed = pd.read_csv(
-            StringIO(read_file(project_ui.value, dataset_ui.value, select_bed.value)),
-            sep="\t",
-            header=None
-        ).rename(
-            columns=dict(zip(range(5), ['chr', 'start', 'end', 'id', 'peak_group']))
-        )
+    @lru_cache
+    def read_bed(project: str, dataset: str, file: str):
+        with mo.status.spinner("Reading BED file..."):
+            return pd.read_csv(
+                StringIO(read_file(project, dataset, file)),
+                sep="\t",
+                header=None
+            ).rename(
+                columns=dict(zip(range(5), ['chr', 'start', 'end', 'id', 'peak_group']))
+            )
 
-    return (bed,)
+    return (read_bed,)
 
 
 @app.cell
-def plot_peak_groups(bed, plt):
+def plot_peak_groups(dataset_ui, plt, project_ui, read_bed, select_bed):
     # Show the number of different peak groups
-    bed["peak_group"].value_counts().plot(kind="bar")
+    read_bed(project_ui.value, dataset_ui.value, select_bed.value)["peak_group"].value_counts().plot(kind="bar")
     plt.ylabel("Number of Peaks")
     plt.xlabel("Peak Group")
     plt.title("Number of Peaks by Group")
@@ -374,47 +368,14 @@ def select_bigwigs(filter_files, mo):
 
 
 @app.cell
-def def_read_bigwig(download_bigWig, lru_cache, mo):
-    # Read in the select_bigWigs files
-    @lru_cache
-    def read_bigWig(project_id: str, dataset_id: str, fn: str):
-        with mo.status.spinner(f"Reading {fn}..."):
-            return download_bigWig(project_id, dataset_id, fn)
+def _(mo, select_bigWigs):
+    if len(select_bigWigs.value) == 0:
+        _out = mo.md("Please select bigWig files for analysis")
+    else:
+        _out = None
+    _out
 
-    return (read_bigWig,)
-
-
-@app.cell
-def def_download_bigwig(client, lru_cache, pyBigWig, tempfile):
-    @lru_cache
-    def download_bigWig(project_id: str, dataset_id: str, fn: str):
-        with tempfile.TemporaryDirectory() as tmp:
-            (
-                client
-                .get_dataset(project_id, dataset_id)
-                .list_files()
-                .get_by_id(fn)
-                .download(download_location=tmp)
-            )
-            return pyBigWig.open(f"{tmp}/{fn}")
-
-    return (download_bigWig,)
-
-
-@app.cell
-def read_bigwigs(
-    Dict,
-    dataset_ui,
-    project_ui,
-    pyBigWig,
-    read_bigWig,
-    select_bigWigs,
-):
-    bigWigs: Dict[str,pyBigWig.pyBigWig] = {
-        fn: read_bigWig(project_ui.value, dataset_ui.value, fn)
-        for fn in select_bigWigs.value
-    }
-    return (bigWigs,)
+    return
 
 
 @app.cell
@@ -443,14 +404,12 @@ def window_ui(
     get_ref,
     get_size,
     mo,
-    select_bigWigs,
     set_justification,
     set_n_bins,
     set_ref,
     set_size,
 ):
     # Get options for how the windows will be set up
-    mo.stop(len(select_bigWigs.value) == 0)
     window_ui = mo.md("""
     ### Set Window Size / Position
 
@@ -469,9 +428,26 @@ def window_ui(
 
 
 @app.cell
-def make_windows(bed, np, window_ui):
+def make_windows(
+    dataset_ui,
+    lru_cache,
+    np,
+    project_ui,
+    read_bed,
+    select_bed,
+    window_ui,
+):
     # Set up a table with the actual window coordinates
-    def _make_windows(size: int, ref: str, justification: str, **kwargs):
+    @lru_cache
+    def _make_windows(
+        project: str,
+        dataset: str,
+        file: str,
+        size: int,
+        ref: str,
+        justification: str
+    ):
+        bed = read_bed(project, dataset, file)
         if ref == "Start":
             ref = bed['start']
         elif ref == "Middle":
@@ -493,26 +469,65 @@ def make_windows(bed, np, window_ui):
         return bed.assign(
             window_start=start.apply(int),
             window_end=end.apply(int)
+        ).query(
+            "window_start >= 0"
         )
 
-    windows = _make_windows(**window_ui.value)
+    windows = _make_windows(
+        project_ui.value,
+        dataset_ui.value,
+        select_bed.value,
+        window_ui.value['size'],
+        window_ui.value['ref'],
+        window_ui.value['justification']
+    )
     return (windows,)
+
+
+@app.cell
+def def_download_bigwig(client, lru_cache, pyBigWig, tempfile):
+    @lru_cache
+    def download_bigWig(project_id: str, dataset_id: str, fn: str):
+        with tempfile.TemporaryDirectory() as tmp:
+            (
+                client
+                .get_dataset(project_id, dataset_id)
+                .list_files()
+                .get_by_id(fn)
+                .download(download_location=tmp)
+            )
+            return pyBigWig.open(f"{tmp}/{fn}")
+
+    return (download_bigWig,)
+
+
+@app.cell
+def def_read_bigwig(download_bigWig, lru_cache, mo):
+    # Read in the select_bigWigs files
+    @lru_cache
+    def read_bigWig(project_id: str, dataset_id: str, fn: str):
+        with mo.status.spinner(f"Reading {fn}..."):
+            return download_bigWig(project_id, dataset_id, fn)
+
+    return (read_bigWig,)
 
 
 @app.cell
 def get_windows(
     Dict,
-    bigWigs: "Dict[str, pyBigWig.pyBigWig]",
+    dataset_ui,
+    lru_cache,
     mo,
     np,
     pd,
+    project_ui,
+    read_bigWig,
     stats,
-    window_ui,
     windows,
 ):
     # Compute the windows
-    def _get_window(wig: Dict[str, np.array], r: pd.Series, bar: mo.status.progress_bar, kw: str, n_bins: int, **kwargs):
-        bar.update()
+    def _get_window(wig: Dict[str, np.array], r: pd.Series, sub_bar: mo.status.progress_bar, n_bins: int):
+        sub_bar.update()
         try:
             return stats.binned_statistic(
                 range(r['window_start'], r['window_end']),
@@ -525,7 +540,11 @@ def get_windows(
             raise e
 
 
-    def _get_windows(kw: str, wig):
+    @lru_cache
+    def get_windows(kw: str, n_bins: int):
+
+        # Read the wig
+        wig = read_bigWig(project_ui.value, dataset_ui.value, kw)
 
         # Get the chromosome lengths
         chrlens = wig.chroms()
@@ -538,21 +557,35 @@ def get_windows(
             )
         ]
 
-        return pd.DataFrame([
-            _get_window(wig, r, bar, kw, **window_ui.value)
-            for _, r in _windows.iterrows()
-        ], index=_windows.index).fillna(0).astype(float)
+        with mo.status.progress_bar(
+            title=kw,
+            total=_windows.shape[0],
+            remove_on_exit=True
+        ) as sub_bar:
+            return pd.DataFrame([
+                _get_window(wig, r, sub_bar, n_bins)
+                for _, r in _windows.iterrows()
+            ], index=_windows.index).fillna(0).astype(float)
 
+    return (get_windows,)
+
+
+@app.cell
+def _(get_windows, mo, select_bigWigs, window_ui):
+    # Populate the dict with each of the selected samples
+    window_dfs = {}
 
     with mo.status.progress_bar(
         title="Calculating window coverage...",
-        total=len(bigWigs) * windows.shape[0],
+        total=len(select_bigWigs.value),
         remove_on_exit=True
     ) as bar:
-        window_dfs = {
-            kw: _get_windows(kw, wig)
-            for kw, wig in bigWigs.items()
-        }
+
+        # Iterate over each selected input file
+        for fn in select_bigWigs.value:
+            # Get the windows
+            window_dfs[fn] = get_windows(fn, window_ui.value["n_bins"])
+            bar.update()
     return (window_dfs,)
 
 
@@ -607,8 +640,8 @@ def _(mo, sample_annot_ui, window_dfs):
 
 
 @app.cell
-def _(bigWigs: "Dict[str, pyBigWig.pyBigWig]", data, mo):
-    mo.stop(len(bigWigs) == 0)
+def _(data, mo, window_dfs):
+    mo.stop(len(window_dfs) == 0)
 
     params = mo.md("""
     ### Plot Settings
