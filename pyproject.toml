@@ -7,9 +7,12 @@ requires-python = ">=3.11"
 dependencies = [
     "cirro>=1.5.4",
     "marimo==0.14.0",
+    "markdown==3.8.2",
     "matplotlib>=3.10.3",
+    "narwhals==1.43.1",
     "pandas>=2.3.0",
     "plotly>=6.1.2",
     "pybigwig==0.3.24",
     "scipy>=1.16.0",
+    "urllib3==2.5.0",
 ]
