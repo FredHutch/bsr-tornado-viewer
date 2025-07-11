@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.13.15"
+__generated_with = "0.14.0"
 app = marimo.App(width="medium", app_title="Tornado Viewer")
 
 
@@ -351,6 +351,7 @@ def plot_peak_groups(bed, plt):
     bed["peak_group"].value_counts().plot(kind="bar")
     plt.ylabel("Number of Peaks")
     plt.xlabel("Peak Group")
+    plt.title("Number of Peaks by Group")
     return
 
 
