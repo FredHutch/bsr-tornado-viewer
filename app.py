@@ -607,7 +607,11 @@ def sample_annot_ui(mo, select_bigWigs, windows):
             for sample_ix, sample_name in enumerate(select_bigWigs.value)
         ])
     ).batch(**{
-        f"name_{sample_ix}": mo.ui.text(label=sample_name, value=sample_name.split("/")[-1][:-len(".bigWig")], full_width=True)
+        f"name_{sample_ix}": mo.ui.text(
+            label=sample_name,
+            value=sample_name.split("/")[-1][:-len(".bigWig")],
+            full_width=True
+        )
         for sample_ix, sample_name in enumerate(select_bigWigs.value)
     })
     sample_annot_ui
@@ -640,13 +644,51 @@ def _(mo, sample_annot_ui, window_dfs):
 
 
 @app.cell
-def _(data, mo, window_dfs):
+def _(mo):
+    get_split_peak_groups, set_split_peak_groups = mo.state(True)
+    get_max_val, set_max_val = mo.state(50)
+    get_heatmap_height, set_heatmap_height = mo.state(0.75)
+    get_figure_height, set_figure_height = mo.state(6)
+    get_figure_width, set_figure_width = mo.state(6)
+    get_title_size, set_title_size = mo.state(8)
+    return (
+        get_figure_height,
+        get_figure_width,
+        get_heatmap_height,
+        get_max_val,
+        get_split_peak_groups,
+        get_title_size,
+        set_figure_height,
+        set_figure_width,
+        set_heatmap_height,
+        set_max_val,
+        set_split_peak_groups,
+        set_title_size,
+    )
+
+
+@app.cell
+def _(
+    get_figure_height,
+    get_figure_width,
+    get_heatmap_height,
+    get_max_val,
+    get_split_peak_groups,
+    get_title_size,
+    mo,
+    set_figure_height,
+    set_figure_width,
+    set_heatmap_height,
+    set_max_val,
+    set_split_peak_groups,
+    set_title_size,
+    window_dfs,
+):
     mo.stop(len(window_dfs) == 0)
 
     params = mo.md("""
     ### Plot Settings
 
-    - {include_samples}
     - {max_val}
     - {heatmap_height}
     - {figure_height}
@@ -654,45 +696,46 @@ def _(data, mo, window_dfs):
     - {title_size}
     - {split_peak_groups}
     """).batch(
-        include_samples=mo.ui.multiselect(
-            label="Include / Reorder Samples:",
-            options=sorted(list(data.keys())),
-            value=sorted(list(data.keys()))
-        ),
         split_peak_groups=mo.ui.checkbox(
             label="Split Peak Groups:",
-            value=True
+            value=get_split_peak_groups(),
+            on_change=set_split_peak_groups
         ),
         max_val=mo.ui.number(
             label="Maximum Value (Heatmap):",
-            value=50
+            value=get_max_val(),
+            on_change=set_max_val
         ),
         heatmap_height=mo.ui.number(
             label="Heatmap Height Ratio:",
             start=0.1,
             stop=0.9,
-            value=0.75
+            value=get_heatmap_height(),
+            on_change=set_heatmap_height
         ),
         figure_height=mo.ui.number(
             label="Figure Height:",
             start=1,
             stop=100,
             step=1,
-            value=6
+            value=get_figure_height(),
+            on_change=set_figure_height
         ),
         figure_width=mo.ui.number(
             label="Figure Width:",
             start=1,
             stop=100,
             step=1,
-            value=6
+            value=get_figure_width(),
+            on_change=set_figure_width
         ),
         title_size=mo.ui.number(
             label="Panel Font Size:",
             start=1,
             stop=100,
             step=1,
-            value=8
+            value=get_title_size(),
+            on_change=set_title_size
         )
     )
     params
@@ -756,15 +799,12 @@ def _(
         peaks: List[str],
         window_size: int,
         split_peak_groups: bool,
-        include_samples: List[str],
         max_val: float,
         heatmap_height: float,
         figure_height: int,
         figure_width: int,
         title_size: int
     ):
-        if len(include_samples) == 0:
-            return
         if len(data) == 0:
             return
         if split_peak_groups and len(peaks) == 0:
@@ -778,10 +818,10 @@ def _(
             figsize=(figure_width, figure_height),
             layout="constrained",
             squeeze=False,
-            **format_subplots(data, include_samples, peaks, split_peak_groups, heatmap_height)
+            **format_subplots(data, peaks, split_peak_groups, heatmap_height)
         )
 
-        for i, group in enumerate(include_samples):
+        for i, group in enumerate(data.keys()):
             if split_peak_groups:
                 df = data[group].loc[
                     windows["peak_group"].isin(peaks)
@@ -831,7 +871,6 @@ def _(
 
     def format_subplots(
         data: Dict[str, pd.DataFrame],
-        include_samples: List[str],
         peaks: List[str],
         split_peak_groups: bool,
         heatmap_height: float,
@@ -842,7 +881,7 @@ def _(
 
             return dict(
                 nrows=1 + len(peaks),
-                ncols=len(include_samples),
+                ncols=len(data),
                 gridspec_kw=dict(
                     height_ratios=[
                         1 - heatmap_height,
@@ -858,7 +897,7 @@ def _(
         else:
             return dict(
                 nrows=2,
-                ncols=len(include_samples),
+                ncols=len(data),
                 gridspec_kw=dict(
                     height_ratios=[1 - heatmap_height, heatmap_height],
                     wspace=0.,
