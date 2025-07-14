@@ -26,43 +26,11 @@ def cirro_dataset_type_filter():
 
 
 @app.cell
-def running_in_wasm():
-    # If the script is running in WASM (instead of local development mode), load micropip
-    import sys
-    if "pyodide" in sys.modules:
-        import micropip
-        running_in_wasm = True
-    else:
-        micropip = None
-        running_in_wasm = False
-    return micropip, running_in_wasm
-
-
-@app.cell
-async def loading_dependencies(micropip, mo, running_in_wasm):
+def loading_dependencies(mo):
     with mo.status.spinner("Loading dependencies"):
         # If we are running in WASM, some dependencies need to be set up appropriately.
         # This is really just aligning the needs of the app with the default library versions
         # that come when a marimo app loads in WASM.
-        if running_in_wasm:
-            print("Installing via micropip")
-            # Downgrade plotly to avoid the use of narwhals
-            await micropip.install("plotly<6.0.0")
-            await micropip.install("ssl")
-            micropip.uninstall("urllib3")
-            micropip.uninstall("httpx")
-            await micropip.install("urllib3==2.3.0")
-            micropip.uninstall("requests")
-            await micropip.install("requests==2.32.3")
-            await micropip.install("httpx==0.26.0")
-            await micropip.install("botocore==1.37.3")
-            await micropip.install("jmespath==1.0.1")
-            await micropip.install("s3transfer==0.11.3")
-            await micropip.install("boto3==1.37.3")
-            await micropip.install("aiobotocore==2.22.0")
-            await micropip.install("cirro[pyodide]==1.5.4")
-            await micropip.install("pyBigWig==0.3.24")
-
         from io import StringIO, BytesIO
         from typing import Dict, List
         from matplotlib import pyplot as plt
@@ -76,12 +44,6 @@ async def loading_dependencies(micropip, mo, running_in_wasm):
 
         from cirro import DataPortalLogin
         from cirro.config import list_tenants
-
-        # A patch to the Cirro client library is applied when running in WASM
-        if running_in_wasm:
-            from cirro.helpers import pyodide_patch_all
-            pyodide_patch_all()
-
     return (
         Axes,
         BytesIO,
