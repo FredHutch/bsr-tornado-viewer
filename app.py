@@ -275,10 +275,11 @@ def _(mo):
 @app.cell
 def select_bed(filter_files, mo):
     # Ask the user to select a BED file
+    bed_files = filter_files(suffix=".bed")
     select_bed = mo.ui.dropdown(
         label="Select BED file:",
-        options=filter_files(suffix=".bed"),
-        value=filter_files(suffix=".bed")[-1]
+        options=bed_files if len(bed_files) > 0 else ["No BED Files Found"],
+        value=bed_files[-1] if len(bed_files) > 0 else "No BED Files Found"
     )
     select_bed
     return (select_bed,)
@@ -302,8 +303,9 @@ def read_bed_file(StringIO, lru_cache, mo, pd, read_file):
 
 
 @app.cell
-def plot_peak_groups(dataset_ui, plt, project_ui, read_bed, select_bed):
+def plot_peak_groups(dataset_ui, mo, plt, project_ui, read_bed, select_bed):
     # Show the number of different peak groups
+    mo.stop(select_bed.value == "No BED Files Found")
     read_bed(project_ui.value, dataset_ui.value, select_bed.value)["peak_group"].value_counts().plot(kind="bar")
     plt.ylabel("Number of Peaks")
     plt.xlabel("Peak Group")
@@ -320,10 +322,11 @@ def _(mo):
 @app.cell
 def select_bigwigs(filter_files, mo):
     # Ask the user to select one or more bigWig files
+    bigwig_file_options = filter_files(suffix=".bigWig")
     select_bigWigs = mo.ui.multiselect(
         label="Select bigWig file(s):",
-        options=filter_files(suffix=".bigWig"),
-        value=[]
+        options=bigwig_file_options if len(bigwig_file_options) > 0 else ["No bigWig Files Found"],
+        value=[] if len(bigwig_file_options) > 0 else ["No bigWig Files Found"]
     )
     select_bigWigs
     return (select_bigWigs,)
@@ -366,12 +369,14 @@ def window_ui(
     get_ref,
     get_size,
     mo,
+    select_bigWigs,
     set_justification,
     set_n_bins,
     set_ref,
     set_size,
 ):
     # Get options for how the windows will be set up
+    mo.stop(len(select_bigWigs.value) == 0 or select_bigWigs.value == ["No bigWig Files Found"])
     window_ui = mo.md("""
     ### Set Window Size / Position
 
