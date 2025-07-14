@@ -5,6 +5,13 @@ app = marimo.App(width="medium", app_title="Tornado Viewer")
 
 
 @app.cell
+def import_marimo():
+    # Load the marimo library in a dedicated cell for efficiency
+    import marimo as mo
+    return (mo,)
+
+
+@app.cell
 def _(mo):
     mo.md(r"""# Fred Hutch Bioinformatics Core: Tornado Viewer""")
     return
@@ -16,13 +23,6 @@ def cirro_dataset_type_filter():
     # This is used to filter the dataset selector, below
     cirro_dataset_type_filter = ["custom_dataset"]
     return (cirro_dataset_type_filter,)
-
-
-@app.cell
-def import_marimo():
-    # Load the marimo library in a dedicated cell for efficiency
-    import marimo as mo
-    return (mo,)
 
 
 @app.cell
@@ -70,7 +70,7 @@ async def loading_dependencies(micropip, mo, running_in_wasm):
         import pandas as pd
         import numpy as np
         from functools import lru_cache
-        # import pyBigWig
+        import pyBigWig
         import tempfile
         from scipy import stats
 
@@ -94,6 +94,7 @@ async def loading_dependencies(micropip, mo, running_in_wasm):
         np,
         pd,
         plt,
+        pyBigWig,
         stats,
         tempfile,
     )
