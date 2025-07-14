@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:debian
+FROM ghcr.io/astral-sh/uv:0.7.19-debian
 
 # Add the contents of the current directory to /app in the container
 WORKDIR /app
