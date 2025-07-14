@@ -70,7 +70,7 @@ async def loading_dependencies(micropip, mo, running_in_wasm):
         import pandas as pd
         import numpy as np
         from functools import lru_cache
-        import pyBigWig
+        # import pyBigWig
         import tempfile
         from scipy import stats
 
@@ -94,7 +94,6 @@ async def loading_dependencies(micropip, mo, running_in_wasm):
         np,
         pd,
         plt,
-        pyBigWig,
         stats,
         tempfile,
     )
