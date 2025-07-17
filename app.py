@@ -35,6 +35,7 @@ def loading_dependencies(mo):
         from typing import Dict, List
         from matplotlib import pyplot as plt
         from matplotlib.axes._axes import Axes
+        import matplotlib.colors as mcolors
         import pandas as pd
         import numpy as np
         from functools import lru_cache
@@ -275,7 +276,7 @@ def _(mo):
 @app.cell
 def select_bed(filter_files, mo):
     # Ask the user to select a BED file
-    bed_files = filter_files(suffix=".bed")
+    bed_files = filter_files(suffix=".txt")
     select_bed = mo.ui.dropdown(
         label="Select BED file:",
         options=bed_files if len(bed_files) > 0 else ["No BED Files Found"],
@@ -294,22 +295,22 @@ def read_bed_file(StringIO, lru_cache, mo, pd, read_file):
             return pd.read_csv(
                 StringIO(read_file(project, dataset, file)),
                 sep="\t",
-                header=None
-            ).rename(
-                columns=dict(zip(range(5), ['chr', 'start', 'end', 'id', 'peak_group']))
-            )
+                # header=None
+            # ).rename(
+            #     columns=dict(zip(range(5), ['chr', 'start', 'end', 'id', 'peak_group']))
+            ).fillna("None")
 
     return (read_bed,)
 
 
 @app.cell
-def plot_peak_groups(dataset_ui, mo, plt, project_ui, read_bed, select_bed):
-    # Show the number of different peak groups
-    mo.stop(select_bed.value == "No BED Files Found")
-    read_bed(project_ui.value, dataset_ui.value, select_bed.value)["peak_group"].value_counts().plot(kind="bar")
-    plt.ylabel("Number of Peaks")
-    plt.xlabel("Peak Group")
-    plt.title("Number of Peaks by Group")
+def plot_peak_groups():
+    # # Show the number of different peak groups
+    # mo.stop(select_bed.value == "No BED Files Found")
+    # read_bed(project_ui.value, dataset_ui.value, select_bed.value)["peak_group"].value_counts().plot(kind="bar")
+    # plt.ylabel("Number of Peaks")
+    # plt.xlabel("Peak Group")
+    # plt.title("Number of Peaks by Group")
     return
 
 
@@ -498,7 +499,7 @@ def get_windows(
         try:
             return stats.binned_statistic(
                 range(r['window_start'], r['window_end']),
-                np.nan_to_num(wig.values(r['chr'], r['window_start'], r['window_end']), nan=0.0),
+                np.nan_to_num(wig.values(r['chrom'], r['window_start'], r['window_end']), nan=0.0),
                 'mean',
                 bins=n_bins
             ).statistic
@@ -519,7 +520,7 @@ def get_windows(
         # Filter down to the valid windows which are contained within the available chromosomes
         _windows = windows.loc[
             windows.apply(
-                lambda r: chrlens.get(r['chr'], 0) >= r['window_end'] and r['window_start'] > 0,
+                lambda r: chrlens.get(r['chrom'], 0) >= r['window_end'] and r['window_start'] > 0,
                 axis=1
             )
         ]
@@ -535,6 +536,22 @@ def get_windows(
             ], index=_windows.index).fillna(0).astype(float)
 
     return (get_windows,)
+
+
+@app.cell
+def _(windows):
+    # Get the options of columns names to use for splitting peaks by (optionally)
+    peak_group_cname_options = [
+        cname for cname in windows.columns.values
+        if cname not in ["chrom", "start", "end", "peak_ID", "window_start", "window_end"]
+    ]
+    return (peak_group_cname_options,)
+
+
+@app.cell
+def _(mo):
+    get_cnames_filter_windows, set_cnames_filter_windows = mo.state([])
+    return
 
 
 @app.cell
@@ -557,9 +574,60 @@ def _(get_windows, mo, select_bigWigs, window_ui):
 
 
 @app.cell
-def sample_annot_ui(mo, select_bigWigs, windows):
-    # Let the user rename and group the wig files
+def _(mo, peak_group_cname_options, windows):
+    # Let the user filter which windows are used for plotting
     mo.stop(windows is None)
+    filter_windows_ui = mo.md("""
+    ### Filter Windows
+
+    """ + "\n".join([
+        "- {" + cname + "}"
+        for cname in peak_group_cname_options
+    ])).batch(
+        **{
+            cname: mo.ui.multiselect(
+                label=cname,
+                options=windows[cname].dropna().value_counts().index.values,
+                value=windows[cname].unique()
+            )
+            for cname in peak_group_cname_options
+        }
+    )
+
+    filter_windows_ui
+    return (filter_windows_ui,)
+
+
+@app.cell
+def _(filter_windows_ui, mo, pd, peak_group_cname_options, windows):
+    # Apply the filtering selected by the user
+    def _passes_filter(r: pd.Series) -> bool:
+        for cname in peak_group_cname_options:
+            if r[cname] not in filter_windows_ui.value[cname]:
+                return False
+        return True
+
+
+    filtered_windows = (
+        windows
+        .assign(passes_filter=windows.apply(_passes_filter, axis=1))
+        .query("passes_filter")
+        .drop(columns=["passes_filter"])
+    )
+    mo.md(f"Number of windows passing filter: {filtered_windows.shape[0]:,}")
+    return (filtered_windows,)
+
+
+@app.cell
+def _(filtered_windows, window_dfs):
+    filtered_window_dfs = {kw: val.reindex(index=filtered_windows.index) for kw, val in window_dfs.items()}
+    return (filtered_window_dfs,)
+
+
+@app.cell
+def sample_annot_ui(filtered_windows, mo, select_bigWigs):
+    # Let the user rename and group the wig files
+    mo.stop(filtered_windows is None)
     sample_annot_ui = mo.md(
         """### Dataset Names
 
@@ -586,87 +654,90 @@ def sample_annot_ui(mo, select_bigWigs, windows):
 
 
 @app.cell
-def _(mo, sample_annot_ui, window_dfs):
+def _(filtered_window_dfs, mo, sample_annot_ui):
     # Apply labels for each selected wig file and merge replicates
-    def _merge_window_data(window_dfs, wig_labels):
+    def _merge_window_data(filtered_window_dfs, wig_labels):
         # Make a list of the labels that were applied by the user
-        labels = [wig_labels[f"name_{ix}"] for ix in range(len(window_dfs))]
+        labels = [wig_labels[f"name_{ix}"] for ix in range(len(filtered_window_dfs))]
 
         merged = {}
         for label in labels:
             if label in merged:
                 continue
-            kws = [kw for kw, _label in zip(window_dfs.keys(), labels) if _label == label]
+            kws = [kw for kw, _label in zip(filtered_window_dfs.keys(), labels) if _label == label]
             if len(kws) == 1:
-                merged[label] = window_dfs[kws[0]]
+                merged[label] = filtered_window_dfs[kws[0]]
             else:
-                merged[label] = sum([window_dfs[kw] for kw in kws]) / len(kws)
+                merged[label] = sum([filtered_window_dfs[kw] for kw in kws]) / len(kws)
 
         return merged
 
     with mo.status.spinner("Merging replicates...", remove_on_exit=True):
-        data = _merge_window_data(window_dfs, sample_annot_ui.value)
+        data = _merge_window_data(filtered_window_dfs, sample_annot_ui.value)
 
     return (data,)
 
 
 @app.cell
-def _(mo):
-    get_split_peak_groups, set_split_peak_groups = mo.state(True)
-    get_max_val, set_max_val = mo.state(50)
+def _(max_val, mo):
+    get_cname_peak_groups, set_cname_peak_groups = mo.state("None")
+    get_max_val, set_max_val = mo.state(max_val)
     get_heatmap_height, set_heatmap_height = mo.state(0.75)
     get_figure_height, set_figure_height = mo.state(6)
-    get_figure_width, set_figure_width = mo.state(6)
+    get_panel_width, set_panel_width = mo.state(2)
     get_title_size, set_title_size = mo.state(8)
     return (
+        get_cname_peak_groups,
         get_figure_height,
-        get_figure_width,
         get_heatmap_height,
         get_max_val,
-        get_split_peak_groups,
+        get_panel_width,
         get_title_size,
+        set_cname_peak_groups,
         set_figure_height,
-        set_figure_width,
         set_heatmap_height,
         set_max_val,
-        set_split_peak_groups,
+        set_panel_width,
         set_title_size,
     )
 
 
 @app.cell
 def _(
+    filtered_window_dfs,
+    get_cname_peak_groups,
     get_figure_height,
-    get_figure_width,
     get_heatmap_height,
     get_max_val,
-    get_split_peak_groups,
+    get_panel_width,
     get_title_size,
     mo,
+    peak_group_cname_options,
+    set_cname_peak_groups,
     set_figure_height,
-    set_figure_width,
     set_heatmap_height,
     set_max_val,
-    set_split_peak_groups,
+    set_panel_width,
     set_title_size,
-    window_dfs,
 ):
-    mo.stop(len(window_dfs) == 0)
+    mo.stop(len(filtered_window_dfs) == 0)
 
     params = mo.md("""
     ### Plot Settings
 
     - {max_val}
     - {heatmap_height}
+    - {cmap}
     - {figure_height}
-    - {figure_width},
+    - {panel_width},
     - {title_size}
-    - {split_peak_groups}
+    - {cname_peak_groups}
     """).batch(
-        split_peak_groups=mo.ui.checkbox(
-            label="Split Peak Groups:",
-            value=get_split_peak_groups(),
-            on_change=set_split_peak_groups
+        cname_peak_groups=mo.ui.dropdown(
+            label="Split Peaks By:",
+            options=["None"] + peak_group_cname_options,
+            value=get_cname_peak_groups(),
+            on_change=set_cname_peak_groups
         ),
         max_val=mo.ui.number(
             label="Maximum Value (Heatmap):",
@@ -688,13 +759,13 @@ def _(
             value=get_figure_height(),
             on_change=set_figure_height
         ),
-        figure_width=mo.ui.number(
-            label="Figure Width:",
+        panel_width=mo.ui.number(
+            label="Panel Width:",
             start=1,
             stop=100,
             step=1,
-            value=get_figure_width(),
-            on_change=set_figure_width
+            value=get_panel_width(),
+            on_change=set_panel_width
         ),
         title_size=mo.ui.number(
             label="Panel Font Size:",
@@ -703,6 +774,13 @@ def _(
             step=1,
             value=get_title_size(),
             on_change=set_title_size
+        ),
+        cmap=mo.ui.dropdown(
+            label="Color Pallete",
+            options=['PiYG', 'PRGn', 'BrBG', 'PuOr', 'RdGy', 'RdBu', 'RdYlBu',
+                      'RdYlGn', 'Spectral', 'coolwarm', 'bwr', 'seismic',
+                      'berlin', 'managua', 'vanimo'],
+            value="bwr"
         )
     )
     params
@@ -710,19 +788,23 @@ def _(
 
 
 @app.cell
-def _(mo, windows):
-    get_peak_groups, set_peak_groups = mo.state(windows['peak_group'].value_counts().index.values[:1])
+def _(filtered_windows, mo, params):
+    get_peak_groups, set_peak_groups = mo.state((
+        filtered_windows[params.value["cname_peak_groups"]].value_counts().index.values[:1]
+        if params.value["cname_peak_groups"] != "None"
+        else []
+    ))
     return get_peak_groups, set_peak_groups
 
 
 @app.cell
-def _(get_peak_groups, mo, params, set_peak_groups, windows):
+def _(filtered_windows, get_peak_groups, mo, params, set_peak_groups):
     # Select peak groups to display
-    if params.value["split_peak_groups"]:
+    if params.value["cname_peak_groups"] != "None":
         select_peaks = mo.md("{groups}").batch(
             groups=mo.ui.multiselect(
                 label="Peak Groups:",
-                options=windows['peak_group'].value_counts().index.values,
+                options=filtered_windows[params.value["cname_peak_groups"]].value_counts().index.values,
                 value=get_peak_groups(),
                 on_change=set_peak_groups
             )
@@ -734,16 +816,48 @@ def _(get_peak_groups, mo, params, set_peak_groups, windows):
 
 
 @app.cell
-def _(mo, params, select_peaks):
-    if len(select_peaks.value) > 0:
-        select_peaks_md = "- " + '\n- '.join(list(select_peaks.value))
-    else:
-        if params.value["split_peak_groups"]:
-            select_peaks_md = "No groups selected"
-        else:
-            select_peaks_md = ""
+def _(mo, select_peaks):
+    rename_peaks_ui = mo.md("\n".join([
+        "- {" + peak_group + "}"
+        for peak_group in select_peaks.value.get("groups", [])
+    ])).batch(
+        **{
+            peak_group: mo.ui.text(
+                label=f"{peak_group}: ",
+                value=peak_group
+            )
+            for peak_group in select_peaks.value.get("groups", [])
+        }
+    )
+    rename_peaks_ui
+    return (rename_peaks_ui,)
 
-    mo.md(select_peaks_md)
+
+@app.cell
+def _(data):
+    # Show the distribution of all values
+    max_val = max(*[df.quantile(0.9).max() for df in data.values()])
+    min_val = min(*[df.min().min() for df in data.values()])
+    return (max_val,)
+
+
+@app.cell
+def _():
+    # # Let the user select the point on the colormap scale for each of three colors
+    # color_options = [n.replace("tab:", "") for n in mcolors.TABLEAU_COLORS]
+    # cmap_ui = mo.md("""
+    # - {color_1} {value_1}
+    # - {color_2} {value_2}
+    # - {color_3} {value_3}
+    # """).batch(
+    #     color_1=mo.ui.dropdown(label="Color 1:", value="blue", options=color_options),
+    #     value_1=mo.ui.slider(value=min_val, start=min_val, stop=max_val, show_value=True),
+    #     color_2=mo.ui.dropdown(label="Color 2:", value="orange", options=color_options),
+    #     value_2=mo.ui.slider(value=np.mean([min_val, max_val]), start=min_val, stop=max_val, show_value=True),
+    #     color_3=mo.ui.dropdown(label="Color 3:", value="red", options=color_options),
+    #     value_3=mo.ui.slider(value=max_val, start=min_val, stop=max_val, show_value=True)
+    # )
+    # cmap_ui
     return
 
 
@@ -754,45 +868,62 @@ def _(
     Dict,
     List,
     data,
+    filtered_windows,
     params,
     pd,
     plt,
+    rename_peaks_ui,
     select_peaks,
     window_ui,
-    windows,
 ):
     def plot_data(
         data: Dict[str, pd.DataFrame],
         peaks: List[str],
+        peak_names: Dict[str, str],
         window_size: int,
-        split_peak_groups: bool,
+        cname_peak_groups: str,
         max_val: float,
         heatmap_height: float,
         figure_height: int,
-        figure_width: int,
-        title_size: int
+        panel_width: int,
+        title_size: int,
+        cmap: str
     ):
         if len(data) == 0:
             return
-        if split_peak_groups and len(peaks) == 0:
+        if cname_peak_groups != "None" and len(peaks) == 0:
             return
 
+        # Make a vector with the modified names of the selected groups
+        if cname_peak_groups != "None":
+            window_groups = (
+                filtered_windows
+                .loc[filtered_windows[cname_peak_groups].isin(peaks)]
+                [cname_peak_groups]
+                .replace(peak_names)
+            )
+        else:
+            window_groups = None
+
         half_window = int(window_size / 2.)
+
+        ordered_peaks = []
+        for peak in peaks:
+            if peak_names[peak] not in ordered_peaks:
+                ordered_peaks.append(peak_names[peak])
 
         fig, axarr = plt.subplots(
             sharex="all",
             sharey="row",
-            figsize=(figure_width, figure_height),
+            figsize=(panel_width * len(data), figure_height),
             layout="constrained",
             squeeze=False,
-            **format_subplots(data, peaks, split_peak_groups, heatmap_height)
+            **format_subplots(data, window_groups, heatmap_height)
         )
 
         for i, group in enumerate(data.keys()):
-            if split_peak_groups:
-                df = data[group].loc[
-                    windows["peak_group"].isin(peaks)
-                ]
+            if window_groups is not None:
+                df = data[group].loc[window_groups.index]
             else:
                 df = data[group]
             df.columns = list(range(
@@ -802,16 +933,16 @@ def _(
             ))
             axarr[0, i].set_title(group.replace(" ", "\n"), size=title_size)
 
-            if split_peak_groups:
-                for peak_group, peak_group_df in df.groupby(windows["peak_group"]):
+            if window_groups is not None:
+                for peak_group, peak_group_df in df.groupby(window_groups):
                     plot_density(peak_group_df, axarr[0, i], label=peak_group)
-                    row_ix = peaks.index(peak_group)
+                    row_ix = ordered_peaks.index(peak_group)
                     assert row_ix is not None
-                    heatmap = plot_heatmap(peak_group_df, axarr[row_ix + 1, i], max_val)
+                    heatmap = plot_heatmap(peak_group_df, axarr[row_ix + 1, i], max_val, cmap)
                     axarr[row_ix + 1, i].set_ylabel(peak_group, rotation=0, horizontalalignment="right")
             else:
                 plot_density(df, axarr[0, i])
-                heatmap = plot_heatmap(df, axarr[1, i], max_val)
+                heatmap = plot_heatmap(df, axarr[1, i], max_val, cmap)
 
             axarr[1, i].set_xticks([0, df.shape[1] / 2., df.shape[1] - 1])
             axarr[1, i].set_xticklabels(
@@ -824,7 +955,7 @@ def _(
             )
 
         fig.colorbar(heatmap, location="bottom", ax=axarr[-1, :], fraction=0.9)
-        if split_peak_groups:
+        if cname_peak_groups != "None":
             axarr[0, i].legend(bbox_to_anchor=[1, 1])
 
         buf = BytesIO()
@@ -838,23 +969,22 @@ def _(
 
     def format_subplots(
         data: Dict[str, pd.DataFrame],
-        peaks: List[str],
-        split_peak_groups: bool,
+        window_groups: pd.Series,
         heatmap_height: float,
     ):
-        if split_peak_groups:
+        if window_groups is not None:
             # Get the number of peaks in each group
-            peak_group_sizes = windows.groupby("peak_group").apply(len).loc[peaks]
+            peak_group_sizes = window_groups.value_counts()
 
             return dict(
-                nrows=1 + len(peaks),
+                nrows=1 + window_groups.nunique(),
                 ncols=len(data),
                 gridspec_kw=dict(
                     height_ratios=[
                         1 - heatmap_height,
                         *[
                             heatmap_height * peak_group_sizes.loc[peak] / peak_group_sizes.sum()
-                            for peak in peaks
+                            for peak in window_groups.unique()
                         ]
                     ],
                     wspace=0.,
@@ -890,7 +1020,8 @@ def _(
     def plot_heatmap(
         df: pd.DataFrame,
         ax: Axes,
-        max_val: float
+        max_val: float,
+        cmap: str
     ):
         plot_df = (
             df
@@ -901,7 +1032,7 @@ def _(
         heatmap = ax.imshow(
             plot_df,
             aspect="auto",
-            cmap="Blues"
+            cmap=cmap
         )
         ax.set_yticks([])
         axvline(ax, df)
@@ -915,6 +1046,7 @@ def _(
     _plot_data = plot_data(
         data,
         select_peaks.value.get("groups", []),
+        rename_peaks_ui.value,
         window_ui.value['size'],
         **params.value
     )
