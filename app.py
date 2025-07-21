@@ -804,7 +804,7 @@ def _(
 @app.cell
 def _(filtered_windows, mo, params):
     get_peak_groups, set_peak_groups = mo.state((
-        filtered_windows[params.value["cname_peak_groups"]].value_counts().index.values[:1]
+        filtered_windows[params.value["cname_peak_groups"]].value_counts().index.values
         if params.value["cname_peak_groups"] != "None"
         else []
     ))
