@@ -300,26 +300,31 @@ def read_bed_file(StringIO, lru_cache, mo, pd, read_file):
     @lru_cache
     def read_bed(project: str, dataset: str, file: str):
         with mo.status.spinner("Reading BED file..."):
-            return pd.read_csv(
-                StringIO(read_file(project, dataset, file)),
-                sep="\t",
-                # header=None
-            # ).rename(
-            #     columns=dict(zip(range(5), ['chr', 'start', 'end', 'id', 'peak_group']))
-            ).fillna("None")
+            # Read the file as text
+            txt = read_file(project, dataset, file)
+
+            # If the first line is a comment, use that as the header
+            if txt[0] == '#':
+                df = (
+                    pd.read_csv(StringIO(txt), sep="\t")
+                    .rename(columns=lambda cname: cname[1:] if cname.startswith("#") else cname)
+               )
+            else:
+                df = (
+                    pd.read_csv(StringIO(txt), sep="\t", header=None)
+                    .rename(columns=lambda i: f"col_{i+1}")
+                )
+
+            # The first three columns are always the same
+            df = df.rename(columns={
+                df.columns.values[0]: "chrom",
+                df.columns.values[1]: "start",
+                df.columns.values[2]: "end",
+            })
+
+            return df.fillna("None")
 
     return (read_bed,)
-
-
-@app.cell
-def plot_peak_groups():
-    # # Show the number of different peak groups
-    # mo.stop(select_bed.value == "No BED Files Found")
-    # read_bed(project_ui.value, dataset_ui.value, select_bed.value)["peak_group"].value_counts().plot(kind="bar")
-    # plt.ylabel("Number of Peaks")
-    # plt.xlabel("Peak Group")
-    # plt.title("Number of Peaks by Group")
-    return
 
 
 @app.cell
@@ -552,6 +557,7 @@ def _(windows):
     peak_group_cname_options = [
         cname for cname in windows.columns.values
         if cname not in ["chrom", "start", "end", "peak_ID", "window_start", "window_end"]
+        and windows[cname].nunique() <= 100
     ]
     return (peak_group_cname_options,)
 
@@ -589,12 +595,12 @@ def _(mo, peak_group_cname_options, windows):
     ### Filter Windows
 
     """ + "\n".join([
-        "- {" + cname + "}"
+        "- {" + str(cname) + "}"
         for cname in peak_group_cname_options
     ])).batch(
         **{
-            cname: mo.ui.multiselect(
-                label=cname,
+            str(cname): mo.ui.multiselect(
+                label=str(cname),
                 options=windows[cname].dropna().value_counts().index.values,
                 value=windows[cname].unique()
             )
