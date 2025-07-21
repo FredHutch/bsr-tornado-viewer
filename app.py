@@ -876,20 +876,7 @@ def _():
 
 
 @app.cell
-def _(
-    Axes,
-    BytesIO,
-    Dict,
-    List,
-    data,
-    filtered_windows,
-    params,
-    pd,
-    plt,
-    rename_peaks_ui,
-    select_peaks,
-    window_ui,
-):
+def _(Axes, BytesIO, Dict, List, filtered_windows, pd, plt):
     def plot_data(
         data: Dict[str, pd.DataFrame],
         peaks: List[str],
@@ -1056,14 +1043,42 @@ def _(
     def axvline(ax: Axes, df: pd.DataFrame):
         ax.axvline(x=df.shape[1] / 2., linestyle="--", color="black", alpha=0.5)
 
+    return (plot_data,)
 
-    _plot_data = plot_data(
-        data,
-        select_peaks.value.get("groups", []),
-        rename_peaks_ui.value,
-        window_ui.value['size'],
-        **params.value
+
+@app.cell
+def _(mo):
+    # Add a radio button to let the user diable the plotting
+    autoplot_button = mo.ui.radio(
+        label="Tornado Plot",
+        value="Automatically Update",
+        options=["Automatically Update", "Pause"]
     )
+    autoplot_button
+    return (autoplot_button,)
+
+
+@app.cell
+def _(
+    autoplot_button,
+    data,
+    params,
+    plot_data,
+    rename_peaks_ui,
+    select_peaks,
+    window_ui,
+):
+    if autoplot_button.value == "Automatically Update":
+        _plot_data = plot_data(
+            data,
+            select_peaks.value.get("groups", []),
+            rename_peaks_ui.value,
+            window_ui.value['size'],
+            **params.value
+        )
+    else:
+        _plot_data = None
+
     if _plot_data is None:
         fig, png_data = None, None
     else:
