@@ -43,12 +43,14 @@ def loading_dependencies(mo):
         import tempfile
         from scipy import stats
 
-        from cirro import DataPortalLogin
+        from cirro import DataPortalLogin, DataPortalProject, DataPortalDataset
         from cirro.config import list_tenants
     return (
         Axes,
         BytesIO,
+        DataPortalDataset,
         DataPortalLogin,
+        DataPortalProject,
         Dict,
         List,
         StringIO,
@@ -148,16 +150,22 @@ def get_client(get_client, mo):
 
 
 @app.cell
-def def_id_to_name():
+def def_id_to_name(DataPortalDataset, DataPortalProject):
     # Helper functions for dealing with lists of objects that may be accessed by id or name
+    def obj_name(i):
+        if isinstance(i, DataPortalProject):
+            return i.name
+        elif isinstance(i, DataPortalDataset):
+            return f"{i.name} ({i.created_at:%Y-%m-%d})"
+
     def id_to_name(obj_list: list, id: str) -> str:
         if obj_list is not None:
-            return {i.id: i.name for i in obj_list}.get(id)
+            return {i.id: obj_name(i) for i in obj_list}.get(id)
 
 
     def name_to_id(obj_list: list) -> dict:
         if obj_list is not None:
-            return {i.name: i.id for i in obj_list}
+            return {obj_name(i): i.id for i in obj_list}
         else:
             return {}
     return id_to_name, name_to_id
@@ -276,7 +284,7 @@ def _(mo):
 @app.cell
 def select_bed(filter_files, mo):
     # Ask the user to select a BED file
-    bed_files = filter_files(suffix=".txt")
+    bed_files = filter_files(suffix=".bed")
     select_bed = mo.ui.dropdown(
         label="Select BED file:",
         options=bed_files if len(bed_files) > 0 else ["No BED Files Found"],
