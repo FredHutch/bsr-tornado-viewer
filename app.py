@@ -715,7 +715,6 @@ def _(
     get_title_size,
     mo,
     peak_group_cname_options,
-    set_cname_peak_groups,
     set_figure_height,
     set_heatmap_height,
     set_max_val,
@@ -739,8 +738,7 @@ def _(
         cname_peak_groups=mo.ui.dropdown(
             label="Split Peaks By:",
             options=["None"] + peak_group_cname_options,
-            value=get_cname_peak_groups(),
-            on_change=set_cname_peak_groups
+            value=get_cname_peak_groups()
         ),
         max_val=mo.ui.number(
             label="Maximum Value (Heatmap):",
@@ -795,13 +793,25 @@ def _(
 
 
 @app.cell
-def _(filtered_windows, mo, params):
-    get_peak_groups, set_peak_groups = mo.state((
-        filtered_windows[params.value["cname_peak_groups"]].value_counts().index.values
-        if params.value["cname_peak_groups"] != "None"
-        else []
-    ))
+def _(mo):
+    get_peak_groups, set_peak_groups = mo.state([])
     return get_peak_groups, set_peak_groups
+
+
+@app.cell
+def _(
+    filtered_windows,
+    get_cname_peak_groups,
+    params,
+    set_cname_peak_groups,
+    set_peak_groups,
+):
+    if get_cname_peak_groups() != params.value["cname_peak_groups"]:
+        set_cname_peak_groups(params.value["cname_peak_groups"])
+        if params.value["cname_peak_groups"] != "None":
+            set_peak_groups(filtered_windows[params.value["cname_peak_groups"]].value_counts().index.values)
+
+    return
 
 
 @app.cell
@@ -841,6 +851,29 @@ def _(mo, select_peaks):
 
 
 @app.cell
+def _(mo, params):
+    get_peak_group_legend_title, set_peak_group_legend_title = mo.state(params.value["cname_peak_groups"])
+    return get_peak_group_legend_title, set_peak_group_legend_title
+
+
+@app.cell
+def _(get_peak_group_legend_title, mo, params, set_peak_group_legend_title):
+    # Select peak groups to display
+    if params.value["cname_peak_groups"] != "None":
+        peak_group_legend_title = mo.md("{peak_group_legend_title}").batch(
+            peak_group_legend_title=mo.ui.text(
+                label="Peak Groups Legend Title:",
+                value=get_peak_group_legend_title(),
+                on_change=set_peak_group_legend_title
+            )
+        )
+    else:
+        peak_group_legend_title = mo.md("").batch()
+    peak_group_legend_title
+    return (peak_group_legend_title,)
+
+
+@app.cell
 def _(data):
     # Show the distribution of all values
     max_val = max(*[df.quantile(0.9).max() for df in data.values()])
@@ -849,31 +882,12 @@ def _(data):
 
 
 @app.cell
-def _():
-    # # Let the user select the point on the colormap scale for each of three colors
-    # color_options = [n.replace("tab:", "") for n in mcolors.TABLEAU_COLORS]
-    # cmap_ui = mo.md("""
-    # - {color_1} {value_1}
-    # - {color_2} {value_2}
-    # - {color_3} {value_3}
-    # """).batch(
-    #     color_1=mo.ui.dropdown(label="Color 1:", value="blue", options=color_options),
-    #     value_1=mo.ui.slider(value=min_val, start=min_val, stop=max_val, show_value=True),
-    #     color_2=mo.ui.dropdown(label="Color 2:", value="orange", options=color_options),
-    #     value_2=mo.ui.slider(value=np.mean([min_val, max_val]), start=min_val, stop=max_val, show_value=True),
-    #     color_3=mo.ui.dropdown(label="Color 3:", value="red", options=color_options),
-    #     value_3=mo.ui.slider(value=max_val, start=min_val, stop=max_val, show_value=True)
-    # )
-    # cmap_ui
-    return
-
-
-@app.cell
 def _(Axes, BytesIO, Dict, List, filtered_windows, pd, plt):
     def plot_data(
         data: Dict[str, pd.DataFrame],
         peaks: List[str],
         peak_names: Dict[str, str],
+        peak_group_legend_title: str,
         window_size: int,
         cname_peak_groups: str,
         max_val: float,
@@ -951,7 +965,7 @@ def _(Axes, BytesIO, Dict, List, filtered_windows, pd, plt):
 
         fig.colorbar(heatmap, location="bottom", ax=axarr[-1, :], fraction=0.9)
         if cname_peak_groups != "None":
-            axarr[0, i].legend(bbox_to_anchor=[1, 1])
+            axarr[0, i].legend(bbox_to_anchor=[1, 1], title=peak_group_legend_title)
 
         buf = BytesIO()
         plt.savefig(buf, format="png")
@@ -1057,6 +1071,7 @@ def _(
     autoplot_button,
     data,
     params,
+    peak_group_legend_title,
     plot_data,
     rename_peaks_ui,
     select_peaks,
@@ -1067,6 +1082,7 @@ def _(
             data,
             select_peaks.value.get("groups", []),
             rename_peaks_ui.value,
+            peak_group_legend_title.value.get("peak_group_legend_title"),
             window_ui.value['size'],
             **params.value
         )
