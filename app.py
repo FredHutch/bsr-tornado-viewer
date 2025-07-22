@@ -13,7 +13,13 @@ def import_marimo():
 
 @app.cell
 def _(mo):
-    mo.md(r"""# Fred Hutch Bioinformatics Core: Tornado Viewer""")
+    mo.vstack([
+        mo.md('<h1 style="text-align: center;">Fred Hutch Bioinformatics Core: Tornado Viewer</h1>'),
+        mo.hstack([
+            mo.md('<img src="https://github.com/FredHutch/bsr-tornado-viewer/blob/main/assets/logo.png?raw=True", style="height:300px">'),
+            mo.md('<img src="https://github.com/FredHutch/bsr-tornado-viewer/blob/main/assets/example.png?raw=True", style="height:300px">')
+        ], justify="center")
+    ])
     return
 
 
@@ -90,7 +96,16 @@ def def_domain_to_name(list_tenants):
 
 @app.cell
 def _(mo):
-    mo.md(r"""## Load Data""")
+    mo.md(
+        r"""
+    ## 1. Load Dataset
+
+    The minimum requirements for displaying a tornado plot are:
+
+    1. A BED file with the genomic regions to include in the display. Annotation columns may optionally be provided to label and filter groups of genomic regions.
+    2. One or more bigWig files with normalized sequencing depth information for a particular sample or replicate.
+    """
+    )
     return
 
 
@@ -342,13 +357,22 @@ def window_ui(
     get_ref,
     get_size,
     mo,
+    select_bed,
     set_n_bins,
     set_ref,
     set_size,
 ):
     # Get options for how the windows will be set up
+    mo.stop(select_bed.value is None)
     window_ui = mo.md("""
     ### Set Window Size / Position
+
+    The tornado plot displays sequencing depth using a window of a particular width,
+    which is broken into a smaller number of bins for easier visual display.
+
+    One window will be computed for each of the regions of the BED file.
+    The middle of the window can be positioned at the start, middle, or end of each of those
+    genomic regions.
 
     - {size}
     - {n_bins}
@@ -546,6 +570,7 @@ def _(windows):
         cname for cname in windows.columns.values
         if cname not in ["chrom", "start", "end", "peak_ID", "window_start", "window_end", "window_left", "window_right"]
         and windows[cname].nunique() <= 100
+        and windows[cname].nunique() > 1
     ]
     return (peak_group_cname_options,)
 
@@ -581,6 +606,8 @@ def _(mo, peak_group_cname_options, windows):
     mo.stop(windows is None)
     filter_windows_ui = mo.md("""
     ### Filter Windows
+
+    Optionally select a subset of windows to display.
 
     """ + "\n".join([
         "- {" + str(cname) + "}"
@@ -633,7 +660,9 @@ def sample_annot_ui(filtered_windows, mo, select_bigWigs):
     sample_annot_ui = mo.md(
         """### Dataset Names
 
-    Datasets annotated with the same name will be averaged together.
+    Manually edit the display name used for each sample in the dataset.
+
+    Additionally, datasets annotated with the same name will be averaged together (i.e., to merge replicates).
 
         """ +
         '\n'.join([
