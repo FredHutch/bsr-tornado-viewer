@@ -327,7 +327,7 @@ def read_bed_file(StringIO, lru_cache, mo, pd, read_file):
             else:
                 df = (
                     pd.read_csv(StringIO(txt), sep="\t", header=None)
-                    .rename(columns=lambda i: f"col_{i+1}")
+                    .rename(columns=lambda i: f"Column {i+1}")
                 )
 
             # The first three columns are always the same
@@ -340,6 +340,39 @@ def read_bed_file(StringIO, lru_cache, mo, pd, read_file):
             return df.fillna("None")
 
     return (read_bed,)
+
+
+@app.cell
+def _(dataset_ui, mo, project_ui, read_bed, select_bed):
+    # Read the BED file
+    bed = read_bed(
+        project_ui.value,
+        dataset_ui.value,
+        select_bed.value
+    )
+    # Find any columns which might contain strand information
+    bed_strand_cols = [
+        cname
+        for cname, cvals in bed.items()
+        if cname not in ['chrom', 'start', 'end']
+        and cvals.nunique() > 1
+        and len(set(cvals.unique()) - set([".", "+", "-"])) == 0
+    ]
+
+    # If there are any such columns
+    if len(bed_strand_cols) > 0:
+        # Let the user pick the strand column (if any)
+        bed_strand_col_ui = mo.md("{bed_strand_col}").batch(
+            bed_strand_col=mo.ui.dropdown(
+                label="Strand Column:",
+                options=["None"] + bed_strand_cols,
+                value=bed_strand_cols[0] if len(bed_strand_cols) == 1 else "None"
+            )
+        )
+    else:
+        bed_strand_col_ui = mo.md("").batch()
+    bed_strand_col_ui
+    return (bed_strand_col_ui,)
 
 
 @app.cell
@@ -418,6 +451,7 @@ def _(mo, select_bigWigs):
 
 @app.cell
 def make_windows(
+    bed_strand_col_ui,
     dataset_ui,
     lru_cache,
     np,
@@ -433,33 +467,32 @@ def make_windows(
         dataset: str,
         file: str,
         size: int,
-        ref: str
+        ref: str,
+        bed_strand_col: str
     ):
         bed = read_bed(project, dataset, file)
+
+        # Make the offset based on the strandedness of the window
+        if bed_strand_col == "None":
+            strand = bed.apply(lambda r: "+", axis=1)
+        else:
+            strand = bed[bed_strand_col].replace({".": "+"})
+            assert strand.isin(set(["+", "-"])).all()
+
+        bed = bed.assign(strand=strand)
+
         if ref == "Start":
-            ref = bed['start']
+            ref = bed.apply(lambda r: r['start'] if r['strand'] == '+' else r['end'], axis=1)
         elif ref == "Middle":
             ref = bed[['start', 'end']].apply(np.mean, axis=1)
         elif ref == "End":
-            ref = bed['end']
+            ref = bed.apply(lambda r: r['end'] if r['strand'] == '+' else r['start'], axis=1)
         else:
             raise ValueError(f"Did not expect ref == '{ref}'")
 
-        # Make the offset based on the strandedness of the window
-        strand = (
-            (bed['start'] < bed['end'])
-            .apply({True: "pos", False: "neg"}.get)
-        )
-        offset = (
-            strand
-            .apply({"pos": size / 2., "neg": -size / 2.}.get)
-        )
         left, right = ref - size / 2., ref + size / 2.
-        start, end = ref - offset, ref + offset
 
         return bed.assign(
-            window_start=start.apply(int),
-            window_end=end.apply(int),
             window_left=left.apply(int),
             window_right=right.apply(int),
             strand=strand
@@ -472,7 +505,8 @@ def make_windows(
         dataset_ui.value,
         select_bed.value,
         window_ui.value['size'],
-        window_ui.value['ref']
+        window_ui.value['ref'],
+        bed_strand_col_ui.value.get("bed_strand_col", "None")
     )
     return (windows,)
 
@@ -522,15 +556,20 @@ def get_windows(
     def _get_window(wig: Dict[str, np.array], r: pd.Series, sub_bar: mo.status.progress_bar, n_bins: int):
         sub_bar.update()
         try:
-            return stats.binned_statistic(
-                range(r['window_start'], r['window_end']),
-                np.nan_to_num(wig.values(r['chrom'], r['window_start'], r['window_end']), nan=0.0),
+            window_stats = stats.binned_statistic(
+                range(r['window_left'], r['window_right']),
+                np.nan_to_num(wig.values(r['chrom'], r['window_left'], r['window_right']), nan=0.0),
                 'mean',
                 bins=n_bins
             ).statistic
         except Exception as e:
             print(r)
             raise e
+
+        if r['strand'] == '-':
+            return window_stats[::-1]
+        else:
+            return window_stats
 
 
     @lru_cache
@@ -568,7 +607,7 @@ def _(windows):
     # Get the options of columns names to use for splitting peaks by (optionally)
     peak_group_cname_options = [
         cname for cname in windows.columns.values
-        if cname not in ["chrom", "start", "end", "peak_ID", "window_start", "window_end", "window_left", "window_right"]
+        if cname not in ["chrom", "start", "end", "peak_ID", "window_left", "window_right"]
         and windows[cname].nunique() <= 100
         and windows[cname].nunique() > 1
     ]
