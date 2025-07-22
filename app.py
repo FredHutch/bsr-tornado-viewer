@@ -917,15 +917,17 @@ def _(Axes, BytesIO, Dict, List, filtered_windows, pd, plt):
                 [cname_peak_groups]
                 .replace(peak_names)
             )
+            renamed_peaks = [peak_names.get(peak) for peak in peaks]
         else:
             window_groups = None
+            renamed_peaks = peaks
 
         half_window = int(window_size / 2.)
 
         ordered_peaks = []
-        for peak in peaks:
-            if peak_names[peak] not in ordered_peaks:
-                ordered_peaks.append(peak_names[peak])
+        for peak in renamed_peaks:
+            if peak not in ordered_peaks:
+                ordered_peaks.append(peak)
 
         fig, axarr = plt.subplots(
             sharex="all",
