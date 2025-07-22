@@ -329,6 +329,41 @@ def read_bed_file(StringIO, lru_cache, mo, pd, read_file):
 
 @app.cell
 def _(mo):
+    # Cache params in the state
+    get_size, set_size = mo.state(2000)
+    get_n_bins, set_n_bins = mo.state(200)
+    get_ref, set_ref = mo.state("Middle")
+    return get_n_bins, get_ref, get_size, set_n_bins, set_ref, set_size
+
+
+@app.cell
+def window_ui(
+    get_n_bins,
+    get_ref,
+    get_size,
+    mo,
+    set_n_bins,
+    set_ref,
+    set_size,
+):
+    # Get options for how the windows will be set up
+    window_ui = mo.md("""
+    ### Set Window Size / Position
+
+    - {size}
+    - {n_bins}
+    - {ref}
+    """).batch(
+        size=mo.ui.number(label="Window Size:", value=get_size(), on_change=set_size),
+        n_bins=mo.ui.number(label="Number of Bins:", value=get_n_bins(), on_change=set_n_bins),
+        ref=mo.ui.dropdown(label="Window Anchor Point:", options=["Start", "Middle", "End"], value=get_ref(), on_change=set_ref)
+    )
+    window_ui
+    return (window_ui,)
+
+
+@app.cell
+def _(mo):
     mo.md(r"""### Select Genome Coverage Tracks""")
     return
 
@@ -358,57 +393,6 @@ def _(mo, select_bigWigs):
 
 
 @app.cell
-def _(mo):
-    # Cache params in the state
-    get_size, set_size = mo.state(2000)
-    get_n_bins, set_n_bins = mo.state(200)
-    get_ref, set_ref = mo.state("Middle")
-    get_justification, set_justification = mo.state("Center")
-    return (
-        get_justification,
-        get_n_bins,
-        get_ref,
-        get_size,
-        set_justification,
-        set_n_bins,
-        set_ref,
-        set_size,
-    )
-
-
-@app.cell
-def window_ui(
-    get_justification,
-    get_n_bins,
-    get_ref,
-    get_size,
-    mo,
-    select_bigWigs,
-    set_justification,
-    set_n_bins,
-    set_ref,
-    set_size,
-):
-    # Get options for how the windows will be set up
-    mo.stop(len(select_bigWigs.value) == 0 or select_bigWigs.value == ["No bigWig Files Found"])
-    window_ui = mo.md("""
-    ### Set Window Size / Position
-
-    - {size}
-    - {n_bins}
-    - {ref}
-    - {justification}
-    """).batch(
-        size=mo.ui.number(label="Window Size:", value=get_size(), on_change=set_size),
-        n_bins=mo.ui.number(label="Number of Bins:", value=get_n_bins(), on_change=set_n_bins),
-        ref=mo.ui.dropdown(label="Region Reference Point:", options=["Start", "Middle", "End"], value=get_ref(), on_change=set_ref),
-        justification=mo.ui.dropdown(label="Window Justification:", options=["Left", "Center", "Right"], value=get_justification(), on_change=set_justification),
-    )
-    window_ui
-    return (window_ui,)
-
-
-@app.cell
 def make_windows(
     dataset_ui,
     lru_cache,
@@ -425,8 +409,7 @@ def make_windows(
         dataset: str,
         file: str,
         size: int,
-        ref: str,
-        justification: str
+        ref: str
     ):
         bed = read_bed(project, dataset, file)
         if ref == "Start":
@@ -438,20 +421,26 @@ def make_windows(
         else:
             raise ValueError(f"Did not expect ref == '{ref}'")
 
-        if justification == "Left":
-            start, end = ref, ref + size
-        elif justification == "Center":
-            start, end = ref - (size / 2.), ref + (size / 2)
-        elif justification == "Right":
-            start, end = ref - size, ref
-        else:
-            raise ValueError(f"Did not expect justification == '{justification}'")
+        # Make the offset based on the strandedness of the window
+        strand = (
+            (bed['start'] < bed['end'])
+            .apply({True: "pos", False: "neg"}.get)
+        )
+        offset = (
+            strand
+            .apply({"pos": size / 2., "neg": -size / 2.}.get)
+        )
+        left, right = ref - size / 2., ref + size / 2.
+        start, end = ref - offset, ref + offset
 
         return bed.assign(
             window_start=start.apply(int),
-            window_end=end.apply(int)
+            window_end=end.apply(int),
+            window_left=left.apply(int),
+            window_right=right.apply(int),
+            strand=strand
         ).query(
-            "window_start >= 0"
+            "window_left >= 0"
         )
 
     windows = _make_windows(
@@ -459,8 +448,7 @@ def make_windows(
         dataset_ui.value,
         select_bed.value,
         window_ui.value['size'],
-        window_ui.value['ref'],
-        window_ui.value['justification']
+        window_ui.value['ref']
     )
     return (windows,)
 
@@ -533,7 +521,7 @@ def get_windows(
         # Filter down to the valid windows which are contained within the available chromosomes
         _windows = windows.loc[
             windows.apply(
-                lambda r: chrlens.get(r['chrom'], 0) >= r['window_end'] and r['window_start'] > 0,
+                lambda r: chrlens.get(r['chrom'], 0) >= r['window_right'] and r['window_left'] > 0,
                 axis=1
             )
         ]
@@ -556,7 +544,7 @@ def _(windows):
     # Get the options of columns names to use for splitting peaks by (optionally)
     peak_group_cname_options = [
         cname for cname in windows.columns.values
-        if cname not in ["chrom", "start", "end", "peak_ID", "window_start", "window_end"]
+        if cname not in ["chrom", "start", "end", "peak_ID", "window_start", "window_end", "window_left", "window_right"]
         and windows[cname].nunique() <= 100
     ]
     return (peak_group_cname_options,)
@@ -698,7 +686,7 @@ def _(max_val, mo):
     get_max_val, set_max_val = mo.state(max_val)
     get_heatmap_height, set_heatmap_height = mo.state(0.75)
     get_figure_height, set_figure_height = mo.state(6)
-    get_panel_width, set_panel_width = mo.state(2)
+    get_panel_width, set_panel_width = mo.state(2.)
     get_title_size, set_title_size = mo.state(8)
     return (
         get_cname_peak_groups,
@@ -745,6 +733,7 @@ def _(
     - {figure_height}
     - {panel_width},
     - {title_size}
+    - {anchor_label}
     - {cname_peak_groups}
     """).batch(
         cname_peak_groups=mo.ui.dropdown(
@@ -775,9 +764,9 @@ def _(
         ),
         panel_width=mo.ui.number(
             label="Panel Width:",
-            start=1,
-            stop=100,
-            step=1,
+            start=0.1,
+            stop=100.,
+            step=0.1,
             value=get_panel_width(),
             on_change=set_panel_width
         ),
@@ -795,6 +784,10 @@ def _(
                       'RdYlGn', 'Spectral', 'coolwarm', 'bwr', 'seismic',
                       'berlin', 'managua', 'vanimo'],
             value="bwr"
+        ),
+        anchor_label=mo.ui.text(
+            label="Anchor Label (x-axis):",
+            value="Center"
         )
     )
     params
@@ -888,6 +881,7 @@ def _(Axes, BytesIO, Dict, List, filtered_windows, pd, plt):
         figure_height: int,
         panel_width: int,
         title_size: int,
+        anchor_label: str,
         cmap: str
     ):
         if len(data) == 0:
@@ -949,7 +943,7 @@ def _(Axes, BytesIO, Dict, List, filtered_windows, pd, plt):
             axarr[1, i].set_xticklabels(
                 [
                     "-" + format_bps(half_window),
-                    "Center",
+                    anchor_label,
                     format_bps(half_window)
                 ],
                 rotation=90
