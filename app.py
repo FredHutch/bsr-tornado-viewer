@@ -733,6 +733,7 @@ def _(
     - {panel_width},
     - {title_size}
     - {anchor_label}
+    - {colorbar_title}
     - {cname_peak_groups}
     """).batch(
         cname_peak_groups=mo.ui.dropdown(
@@ -786,6 +787,10 @@ def _(
         anchor_label=mo.ui.text(
             label="Anchor Label (x-axis):",
             value="Center"
+        ),
+        colorbar_title=mo.ui.text(
+            label="Colorbar Label:",
+            value="CPM"
         )
     )
     params
@@ -896,7 +901,8 @@ def _(Axes, BytesIO, Dict, List, filtered_windows, pd, plt):
         panel_width: int,
         title_size: int,
         anchor_label: str,
-        cmap: str
+        cmap: str,
+        colorbar_title: str
     ):
         if len(data) == 0:
             return
@@ -963,7 +969,8 @@ def _(Axes, BytesIO, Dict, List, filtered_windows, pd, plt):
                 rotation=90
             )
 
-        fig.colorbar(heatmap, location="bottom", ax=axarr[-1, :], fraction=0.9)
+        cbar = fig.colorbar(heatmap, location="bottom", ax=axarr[-1, :], fraction=0.9)
+        cbar.ax.set_title(colorbar_title)
         if cname_peak_groups != "None":
             axarr[0, i].legend(bbox_to_anchor=[1, 1], title=peak_group_legend_title)
 
