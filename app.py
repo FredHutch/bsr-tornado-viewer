@@ -343,7 +343,7 @@ def read_bed_file(StringIO, lru_cache, mo, pd, read_file):
 
 
 @app.cell
-def _(dataset_ui, mo, project_ui, read_bed, select_bed):
+def _(dataset_ui, project_ui, read_bed, select_bed):
     # Read the BED file
     bed = read_bed(
         project_ui.value,
@@ -358,7 +358,26 @@ def _(dataset_ui, mo, project_ui, read_bed, select_bed):
         and cvals.nunique() > 1
         and len(set(cvals.unique()) - set([".", "+", "-"])) == 0
     ]
+    return (bed_strand_cols,)
 
+
+@app.cell
+def _(mo):
+    get_bed_strand_col, set_bed_strand_col = mo.state(None)
+    return get_bed_strand_col, set_bed_strand_col
+
+
+@app.cell
+def _(bed_strand_cols, get_bed_strand_col, set_bed_strand_col):
+    if get_bed_strand_col() is None or get_bed_strand_col() not in ["None"] + bed_strand_cols:
+        set_bed_strand_col(
+            bed_strand_cols[0] if len(bed_strand_cols) == 1 else "None"
+        )
+    return
+
+
+@app.cell
+def _(bed_strand_cols, get_bed_strand_col, mo, set_bed_strand_col):
     # If there are any such columns
     if len(bed_strand_cols) > 0:
         # Let the user pick the strand column (if any)
@@ -366,7 +385,8 @@ def _(dataset_ui, mo, project_ui, read_bed, select_bed):
             bed_strand_col=mo.ui.dropdown(
                 label="Strand Column:",
                 options=["None"] + bed_strand_cols,
-                value=bed_strand_cols[0] if len(bed_strand_cols) == 1 else "None"
+                value=get_bed_strand_col(),
+                on_change=set_bed_strand_col
             )
         )
     else:
@@ -492,6 +512,94 @@ def _(
     )
     mo.md(f"Found {windows.shape[0]:,} windows")
     return (windows,)
+
+
+@app.cell
+def _(make_windows_button, mo):
+    mo.stop(make_windows_button.value)
+    mo.ui.button(label="Must Compute Windows to Continue", kind="warn")
+    return
+
+
+@app.cell
+def _(mo):
+    get_filter_windows_dict, set_filter_windows_dict = mo.state({})
+    return get_filter_windows_dict, set_filter_windows_dict
+
+
+@app.cell
+def _(peak_group_cname_options, windows):
+    filter_window_options = {
+        str(cname): windows[cname].dropna().value_counts().index.values
+        for cname in peak_group_cname_options
+    }
+    return (filter_window_options,)
+
+
+@app.cell
+def _(
+    filter_window_options,
+    get_filter_windows_dict,
+    mo,
+    peak_group_cname_options,
+    windows,
+):
+    # Let the user filter which windows are used for plotting
+    mo.stop(windows is None)
+    filter_windows_ui = mo.md("""
+    ### Filter Windows
+
+    Optionally select a subset of windows to display.
+
+    """ + "\n".join([
+        "- {" + str(cname) + "}"
+        for cname in peak_group_cname_options
+    ])).batch(
+        **{
+            str(cname): mo.ui.multiselect(
+                label=str(cname),
+                options=filter_window_options[str(cname)],
+                value=[
+                    n for n in get_filter_windows_dict().get(
+                        str(cname),
+                        filter_window_options[str(cname)]
+                    )
+                    if n in filter_window_options[str(cname)]
+                ]
+            )
+            for cname in peak_group_cname_options
+        }
+    )
+
+    filter_windows_ui
+    return (filter_windows_ui,)
+
+
+@app.cell
+def _(filter_windows_ui, get_filter_windows_dict, set_filter_windows_dict):
+    if filter_windows_ui.value != get_filter_windows_dict():
+        set_filter_windows_dict(filter_windows_ui.value)
+    return
+
+
+@app.cell
+def _(filter_windows_ui, mo, pd, peak_group_cname_options, windows):
+    # Apply the filtering selected by the user
+    def _passes_filter(r: pd.Series) -> bool:
+        for cname in peak_group_cname_options:
+            if r[cname] not in filter_windows_ui.value[cname]:
+                return False
+        return True
+
+
+    filtered_windows = (
+        windows
+        .assign(passes_filter=windows.apply(_passes_filter, axis=1))
+        .query("passes_filter")
+        .drop(columns=["passes_filter"])
+    )
+    mo.md(f"Number of windows passing filter: {filtered_windows.shape[0]:,}")
+    return (filtered_windows,)
 
 
 @app.cell
@@ -642,6 +750,13 @@ def _(mo):
 
 
 @app.cell
+def _(calc_coverage_button, mo):
+    mo.stop(calc_coverage_button.value)
+    mo.ui.button(label="Must Compute Sequencing Depth to Continue", kind="warn")
+    return
+
+
+@app.cell
 def _(calc_coverage_button, get_windows, mo, select_bigWigs, window_ui):
     mo.stop(calc_coverage_button.value is False)
     # Populate the dict with each of the selected samples
@@ -664,60 +779,24 @@ def _(calc_coverage_button, get_windows, mo, select_bigWigs, window_ui):
 
 
 @app.cell
-def _(mo, peak_group_cname_options, windows):
-    # Let the user filter which windows are used for plotting
-    mo.stop(windows is None)
-    filter_windows_ui = mo.md("""
-    ### Filter Windows
-
-    Optionally select a subset of windows to display.
-
-    """ + "\n".join([
-        "- {" + str(cname) + "}"
-        for cname in peak_group_cname_options
-    ])).batch(
-        **{
-            str(cname): mo.ui.multiselect(
-                label=str(cname),
-                options=windows[cname].dropna().value_counts().index.values,
-                value=windows[cname].unique()
-            )
-            for cname in peak_group_cname_options
-        }
-    )
-
-    filter_windows_ui
-    return (filter_windows_ui,)
-
-
-@app.cell
-def _(filter_windows_ui, mo, pd, peak_group_cname_options, windows):
-    # Apply the filtering selected by the user
-    def _passes_filter(r: pd.Series) -> bool:
-        for cname in peak_group_cname_options:
-            if r[cname] not in filter_windows_ui.value[cname]:
-                return False
-        return True
-
-
-    filtered_windows = (
-        windows
-        .assign(passes_filter=windows.apply(_passes_filter, axis=1))
-        .query("passes_filter")
-        .drop(columns=["passes_filter"])
-    )
-    mo.md(f"Number of windows passing filter: {filtered_windows.shape[0]:,}")
-    return (filtered_windows,)
-
-
-@app.cell
 def _(filtered_windows, window_dfs):
     filtered_window_dfs = {kw: val.reindex(index=filtered_windows.index) for kw, val in window_dfs.items()}
     return (filtered_window_dfs,)
 
 
 @app.cell
-def sample_annot_ui(filtered_windows, mo, select_bigWigs):
+def _(mo):
+    get_sample_annot_dict, set_sample_annot_dict = mo.state({})
+    return get_sample_annot_dict, set_sample_annot_dict
+
+
+@app.cell
+def sample_annot_ui(
+    filtered_windows,
+    get_sample_annot_dict,
+    mo,
+    select_bigWigs,
+):
     # Let the user rename and group the wig files
     mo.stop(filtered_windows is None)
     sample_annot_ui = mo.md(
@@ -738,13 +817,23 @@ def sample_annot_ui(filtered_windows, mo, select_bigWigs):
     ).batch(**{
         f"name_{sample_ix}": mo.ui.text(
             label=sample_name,
-            value=sample_name.split("/")[-1][:-len(".bigWig")],
+            value=get_sample_annot_dict().get(
+                f"name_{sample_ix}",
+                sample_name.split("/")[-1][:-len(".bigWig")]
+            ),
             full_width=True
         )
         for sample_ix, sample_name in enumerate(select_bigWigs.value)
     })
     sample_annot_ui
     return (sample_annot_ui,)
+
+
+@app.cell
+def _(get_sample_annot_dict, sample_annot_ui, set_sample_annot_dict):
+    if sample_annot_ui.value != get_sample_annot_dict():
+        set_sample_annot_dict(sample_annot_ui.value)
+    return
 
 
 @app.cell
@@ -780,14 +869,23 @@ def _(max_val, mo):
     get_figure_height, set_figure_height = mo.state(6)
     get_panel_width, set_panel_width = mo.state(2.)
     get_title_size, set_title_size = mo.state(8)
+    get_cmap, set_cmap = mo.state("bwr")
+    get_anchor_label, set_anchor_label = mo.state("Center")
+    get_colorbar_title, set_colorbar_title = mo.state("CPM")
     return (
+        get_anchor_label,
+        get_cmap,
         get_cname_peak_groups,
+        get_colorbar_title,
         get_figure_height,
         get_heatmap_height,
         get_max_val,
         get_panel_width,
         get_title_size,
+        set_anchor_label,
+        set_cmap,
         set_cname_peak_groups,
+        set_colorbar_title,
         set_figure_height,
         set_heatmap_height,
         set_max_val,
@@ -799,7 +897,10 @@ def _(max_val, mo):
 @app.cell
 def _(
     filtered_window_dfs,
+    get_anchor_label,
+    get_cmap,
     get_cname_peak_groups,
+    get_colorbar_title,
     get_figure_height,
     get_heatmap_height,
     get_max_val,
@@ -807,6 +908,10 @@ def _(
     get_title_size,
     mo,
     peak_group_cname_options,
+    set_anchor_label,
+    set_cmap,
+    set_cname_peak_groups,
+    set_colorbar_title,
     set_figure_height,
     set_heatmap_height,
     set_max_val,
@@ -831,7 +936,12 @@ def _(
         cname_peak_groups=mo.ui.dropdown(
             label="Split Peaks By:",
             options=["None"] + peak_group_cname_options,
-            value=get_cname_peak_groups()
+            value=(
+                get_cname_peak_groups()
+                if get_cname_peak_groups() in ["None"] + peak_group_cname_options
+                else "None"
+            ),
+            on_change=set_cname_peak_groups
         ),
         max_val=mo.ui.number(
             label="Maximum Value (Heatmap):",
@@ -874,15 +984,18 @@ def _(
             options=['PiYG', 'PRGn', 'BrBG', 'PuOr', 'RdGy', 'RdBu', 'RdYlBu',
                       'RdYlGn', 'Spectral', 'coolwarm', 'bwr', 'seismic',
                       'berlin', 'managua', 'vanimo'],
-            value="bwr"
+            value=get_cmap(),
+            on_change=set_cmap
         ),
         anchor_label=mo.ui.text(
             label="Anchor Label (x-axis):",
-            value="Center"
+            value=get_anchor_label(),
+            on_change=set_anchor_label
         ),
         colorbar_title=mo.ui.text(
             label="Colorbar Label:",
-            value="CPM"
+            value=get_colorbar_title(),
+            on_change=set_colorbar_title
         )
     )
     params
@@ -919,7 +1032,10 @@ def _(filtered_windows, get_peak_groups, mo, params, set_peak_groups):
             groups=mo.ui.multiselect(
                 label="Peak Groups:",
                 options=filtered_windows[params.value["cname_peak_groups"]].value_counts().index.values,
-                value=get_peak_groups(),
+                value=[
+                    n for n in get_peak_groups()
+                    if n in filtered_windows[params.value["cname_peak_groups"]].value_counts().index.values
+                ],
                 on_change=set_peak_groups
             )
         )
@@ -930,7 +1046,13 @@ def _(filtered_windows, get_peak_groups, mo, params, set_peak_groups):
 
 
 @app.cell
-def _(mo, select_peaks):
+def _(mo):
+    get_rename_peaks, set_rename_peaks = mo.state({})
+    return get_rename_peaks, set_rename_peaks
+
+
+@app.cell
+def _(get_rename_peaks, mo, select_peaks):
     rename_peaks_ui = mo.md("\n".join([
         "- {" + peak_group + "}"
         for peak_group in select_peaks.value.get("groups", [])
@@ -938,13 +1060,20 @@ def _(mo, select_peaks):
         **{
             peak_group: mo.ui.text(
                 label=f"{peak_group}: ",
-                value=peak_group
+                value=get_rename_peaks().get(peak_group, peak_group)
             )
             for peak_group in select_peaks.value.get("groups", [])
         }
     )
     rename_peaks_ui
     return (rename_peaks_ui,)
+
+
+@app.cell
+def _(get_rename_peaks, rename_peaks_ui, set_rename_peaks):
+    if rename_peaks_ui.value != get_rename_peaks():
+        set_rename_peaks(rename_peaks_ui.value)
+    return
 
 
 @app.cell
