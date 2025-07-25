@@ -98,7 +98,7 @@ def def_domain_to_name(list_tenants):
 def _(mo):
     mo.md(
         r"""
-    ## 1. Load Dataset
+    ### 1. Load Dataset
 
     The minimum requirements for displaying a tornado plot are:
 
@@ -296,7 +296,7 @@ def _(dataset_ui, filter_files, mo, project_ui, read_file):
     readme = filter_files(suffix=("/readme.txt", "/readme.md"))
     if len(readme) > 0:
         readme_md = read_file(project_ui.value, dataset_ui.value, readme[0])
-        readme_ui = mo.md(readme_md)
+        readme_ui = mo.accordion(dict(README=mo.md(readme_md)))
     else:
         readme_ui = mo.md("")
     readme_ui
@@ -305,7 +305,12 @@ def _(dataset_ui, filter_files, mo, project_ui, read_file):
 
 @app.cell
 def _(mo):
-    mo.md(r"""### Select Regions (BED)""")
+    mo.md(
+        r"""
+    <br>
+    ### 2a. Select Regions (BED)
+    """
+    )
     return
 
 
@@ -344,11 +349,7 @@ def read_bed_file(StringIO, lru_cache, mo, pd, read_file):
                 )
 
             # The first three columns are always the same
-            df = df.rename(columns={
-                df.columns.values[0]: "chrom",
-                df.columns.values[1]: "start",
-                df.columns.values[2]: "end",
-            })
+            df = df.rename(columns=dict(zip(df.columns.values, ['chrom', 'start', 'end'])))
 
             return df.fillna("None")
 
@@ -431,7 +432,7 @@ def window_ui(
     # Get options for how the windows will be set up
     mo.stop(select_bed.value is None)
     window_ui = mo.md("""
-    ### Set Window Size / Position
+    ### 2b. Set Window Size / Position
 
     The tornado plot displays sequencing depth using a window of a particular width,
     which is broken into a smaller number of bins for easier visual display.
@@ -560,7 +561,8 @@ def _(
     # Let the user filter which windows are used for plotting
     mo.stop(windows is None)
     filter_windows_ui = mo.md("""
-    ### Filter Windows
+    <br>
+    ### 3. Filter Windows
 
     Optionally select a subset of windows to display.
 
@@ -617,7 +619,12 @@ def _(filter_windows_ui, mo, pd, peak_group_cname_options, windows):
 
 @app.cell
 def _(mo):
-    mo.md(r"""### Select Genome Coverage Tracks""")
+    mo.md(
+        r"""
+    <br>
+    ### 4. Select Genome Coverage Tracks
+    """
+    )
     return
 
 
@@ -813,7 +820,8 @@ def sample_annot_ui(
     # Let the user rename and group the wig files
     mo.stop(filtered_windows is None)
     sample_annot_ui = mo.md(
-        """### Dataset Names
+        """<br>
+    ### 5. Dataset Names
 
     Manually edit the display name used for each sample in the dataset.
 
@@ -934,7 +942,8 @@ def _(
     mo.stop(len(filtered_window_dfs) == 0)
 
     params = mo.md("""
-    ### Plot Settings
+    <br>
+    ### 6. Plot Settings
 
     - {max_val}
     - {heatmap_height}
