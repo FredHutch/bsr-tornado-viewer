@@ -291,6 +291,19 @@ def def_filter_files(all_files):
 
 
 @app.cell
+def _(dataset_ui, filter_files, mo, project_ui, read_file):
+    # If there is a README.md file, display it
+    readme = filter_files(suffix=("/readme.txt", "/readme.md"))
+    if len(readme) > 0:
+        readme_md = read_file(project_ui.value, dataset_ui.value, readme[0])
+        readme_ui = mo.md(readme_md)
+    else:
+        readme_ui = mo.md("")
+    readme_ui
+    return
+
+
+@app.cell
 def _(mo):
     mo.md(r"""### Select Regions (BED)""")
     return
