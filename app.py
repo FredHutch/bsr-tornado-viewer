@@ -420,49 +420,10 @@ def window_ui(
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""### Select Genome Coverage Tracks""")
-    return
-
-
-@app.cell
-def select_bigwigs(filter_files, mo):
-    # Ask the user to select one or more bigWig files
-    bigwig_file_options = filter_files(suffix=".bigWig")
-    select_bigWigs = mo.ui.multiselect(
-        label="Select bigWig file(s):",
-        options=bigwig_file_options if len(bigwig_file_options) > 0 else ["No bigWig Files Found"],
-        value=[] if len(bigwig_file_options) > 0 else ["No bigWig Files Found"]
-    )
-    select_bigWigs
-    return (select_bigWigs,)
-
-
-@app.cell
-def _(mo, select_bigWigs):
-    if len(select_bigWigs.value) == 0:
-        _out = mo.md("Please select bigWig files for analysis")
-    else:
-        _out = None
-    _out
-
-    return
-
-
-@app.cell
-def make_windows(
-    bed_strand_col_ui,
-    dataset_ui,
-    lru_cache,
-    np,
-    project_ui,
-    read_bed,
-    select_bed,
-    window_ui,
-):
+def make_windows(lru_cache, np, read_bed):
     # Set up a table with the actual window coordinates
     @lru_cache
-    def _make_windows(
+    def make_windows(
         project: str,
         dataset: str,
         file: str,
@@ -499,8 +460,29 @@ def make_windows(
         ).query(
             "window_left >= 0"
         )
+    return (make_windows,)
 
-    windows = _make_windows(
+
+@app.cell
+def _(mo):
+    make_windows_button = mo.ui.run_button(label="Compute Windows")
+    make_windows_button
+    return (make_windows_button,)
+
+
+@app.cell
+def _(
+    bed_strand_col_ui,
+    dataset_ui,
+    make_windows,
+    make_windows_button,
+    mo,
+    project_ui,
+    select_bed,
+    window_ui,
+):
+    mo.stop(make_windows_button.value is False)
+    windows = make_windows(
         project_ui.value,
         dataset_ui.value,
         select_bed.value,
@@ -508,7 +490,38 @@ def make_windows(
         window_ui.value['ref'],
         bed_strand_col_ui.value.get("bed_strand_col", "None")
     )
+    mo.md(f"Found {windows.shape[0]:,} windows")
     return (windows,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""### Select Genome Coverage Tracks""")
+    return
+
+
+@app.cell
+def select_bigwigs(filter_files, mo):
+    # Ask the user to select one or more bigWig files
+    bigwig_file_options = filter_files(suffix=".bigWig")
+    select_bigWigs = mo.ui.multiselect(
+        label="Select bigWig file(s):",
+        options=bigwig_file_options if len(bigwig_file_options) > 0 else ["No bigWig Files Found"],
+        value=[] if len(bigwig_file_options) > 0 else ["No bigWig Files Found"]
+    )
+    select_bigWigs
+    return (select_bigWigs,)
+
+
+@app.cell
+def _(mo, select_bigWigs):
+    if len(select_bigWigs.value) == 0:
+        _out = mo.md("Please select bigWig files for analysis")
+    else:
+        _out = None
+    _out
+
+    return
 
 
 @app.cell
@@ -621,7 +634,16 @@ def _(mo):
 
 
 @app.cell
-def _(get_windows, mo, select_bigWigs, window_ui):
+def _(mo):
+    # The user must click a button to calculate genome coverage in those windows
+    calc_coverage_button = mo.ui.run_button(label="Compute Sequencing Depth per Sample")
+    calc_coverage_button
+    return (calc_coverage_button,)
+
+
+@app.cell
+def _(calc_coverage_button, get_windows, mo, select_bigWigs, window_ui):
+    mo.stop(calc_coverage_button.value is False)
     # Populate the dict with each of the selected samples
     window_dfs = {}
 
@@ -636,6 +658,8 @@ def _(get_windows, mo, select_bigWigs, window_ui):
             # Get the windows
             window_dfs[fn] = get_windows(fn, window_ui.value["n_bins"])
             bar.update()
+
+    mo.md(f"Processed {len(window_dfs):,} samples")
     return (window_dfs,)
 
 
