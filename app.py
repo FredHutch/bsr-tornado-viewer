@@ -281,11 +281,11 @@ def def_filter_files(all_files):
         return [
             fn for fn in all_files
             if
-            (prefix is None or fn.startswith(prefix) or fn.startswith("data/" + prefix))
+            (prefix is None or fn.lower().startswith(prefix) or fn.lower()[5:].startswith(prefix))
             and
-            (suffix is None or fn.endswith(suffix) or fn.endswith("data/" + suffix))
+            (suffix is None or fn.lower().endswith(suffix))
             and
-            (contains is None or contains in fn)
+            (contains is None or contains in fn.lower())
         ]
     return (filter_files,)
 
@@ -299,7 +299,7 @@ def _(mo):
 @app.cell
 def select_bed(filter_files, mo):
     # Ask the user to select a BED file
-    bed_files = filter_files(suffix=".bed")
+    bed_files = filter_files(suffix=("bed", 'narrowpeak', 'broadpeak', 'txt'))
     select_bed = mo.ui.dropdown(
         label="Select BED file:",
         options=bed_files if len(bed_files) > 0 else ["No BED Files Found"],
@@ -611,7 +611,7 @@ def _(mo):
 @app.cell
 def select_bigwigs(filter_files, mo):
     # Ask the user to select one or more bigWig files
-    bigwig_file_options = filter_files(suffix=".bigWig")
+    bigwig_file_options = filter_files(suffix=(".bigwig", ".bw"))
     select_bigWigs = mo.ui.multiselect(
         label="Select bigWig file(s):",
         options=bigwig_file_options if len(bigwig_file_options) > 0 else ["No bigWig Files Found"],
