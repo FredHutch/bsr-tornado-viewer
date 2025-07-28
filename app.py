@@ -318,10 +318,20 @@ def _(mo):
 def select_bed(filter_files, mo):
     # Ask the user to select a BED file
     bed_files = filter_files(suffix=("bed", 'narrowpeak', 'broadpeak', 'txt'))
+
+    def pick_default_bed(bed_files) -> str:
+        if len(bed_files) > 0:
+            for f in bed_files:
+                if f.endswith('.bed'):
+                    return f
+            return f
+        else:
+            "No BED Files Found"
+
     select_bed = mo.ui.dropdown(
         label="Select BED file:",
         options=bed_files if len(bed_files) > 0 else ["No BED Files Found"],
-        value=bed_files[-1] if len(bed_files) > 0 else "No BED Files Found"
+        value=pick_default_bed(bed_files)
     )
     select_bed
     return (select_bed,)
