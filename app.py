@@ -497,13 +497,21 @@ def make_windows(lru_cache, np, read_bed):
 
         left, right = ref - size / 2., ref + size / 2.
 
-        return bed.assign(
+        bed = bed.assign(
             window_left=left.apply(int),
             window_right=right.apply(int),
             strand=strand
-        ).query(
-            "window_left >= 0"
         )
+        tot_n = bed.shape[0]
+        bed = bed.query("window_left >= 0")
+        final_n = bed.shape[0]
+
+        if tot_n > final_n:
+            msg = f"Note: {tot_n - final_n:,} windows were dropped because the computed window extended beyond the contig."
+        else:
+            msg = ""
+
+        return bed, msg
     return (make_windows,)
 
 
@@ -526,7 +534,7 @@ def _(
     window_ui,
 ):
     mo.stop(make_windows_button.value is False)
-    windows = make_windows(
+    windows, window_msg = make_windows(
         project_ui.value,
         dataset_ui.value,
         select_bed.value,
@@ -534,7 +542,7 @@ def _(
         window_ui.value['ref'],
         bed_strand_col_ui.value.get("bed_strand_col", "None")
     )
-    mo.md(f"Found {windows.shape[0]:,} windows")
+    mo.md(f"Found {windows.shape[0]:,} windows\n\n{window_msg}")
     return (windows,)
 
 
