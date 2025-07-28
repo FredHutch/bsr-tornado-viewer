@@ -1091,13 +1091,13 @@ def _(mo):
 @app.cell
 def _(get_rename_peaks, mo, select_peaks):
     rename_peaks_ui = mo.md("\n".join([
-        "- {" + peak_group + "}"
+        "- {group_" + str(peak_group) + "}"
         for peak_group in select_peaks.value.get("groups", [])
     ])).batch(
         **{
-            peak_group: mo.ui.text(
+            "group_" + str(peak_group): mo.ui.text(
                 label=f"{peak_group}: ",
-                value=get_rename_peaks().get(peak_group, peak_group)
+                value=get_rename_peaks().get("group_" + str(peak_group), str(peak_group))
             )
             for peak_group in select_peaks.value.get("groups", [])
         }
@@ -1173,9 +1173,10 @@ def _(Axes, BytesIO, Dict, List, filtered_windows, pd, plt):
                 filtered_windows
                 .loc[filtered_windows[cname_peak_groups].isin(peaks)]
                 [cname_peak_groups]
+                .apply(lambda s: "group_" + str(s))
                 .replace(peak_names)
             )
-            renamed_peaks = [peak_names.get(peak) for peak in peaks]
+            renamed_peaks = [peak_names.get("group_" + str(peak)) for peak in peaks]
         else:
             window_groups = None
             renamed_peaks = peaks
@@ -1211,7 +1212,7 @@ def _(Axes, BytesIO, Dict, List, filtered_windows, pd, plt):
             if window_groups is not None:
                 for peak_group, peak_group_df in df.groupby(window_groups):
                     plot_density(peak_group_df, axarr[0, i], label=peak_group)
-                    row_ix = ordered_peaks.index(peak_group)
+                    row_ix = ordered_peaks.index(str(peak_group))
                     assert row_ix is not None
                     heatmap = plot_heatmap(peak_group_df, axarr[row_ix + 1, i], max_val, cmap)
                     axarr[row_ix + 1, i].set_ylabel(peak_group, rotation=0, horizontalalignment="right")
