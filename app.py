@@ -1323,8 +1323,10 @@ def _(Axes, BytesIO, Dict, List, filtered_windows, pd, plt):
 
 
 @app.cell
-def _(mo):
+def _(max_val, mo):
     # Add a radio button to let the user diable the plotting
+    max_val
+
     autoplot_button = mo.ui.radio(
         label="Tornado Plot",
         value="Automatically Update",
@@ -1372,11 +1374,15 @@ def _(fig):
 
 @app.cell
 def _(mo, png_data):
-    mo.download(
-        data=png_data,
-        filename="tornado_plot.png",
-        label="Save as PNG"
-    )
+    if png_data is not None:
+        download_png_data = mo.download(
+            data=png_data,
+            filename="tornado_plot.png",
+            label="Save as PNG"
+        )
+    else:
+        download_png_data = mo.md("")
+    download_png_data
     return
 
 
