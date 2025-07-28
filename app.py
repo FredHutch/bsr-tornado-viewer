@@ -307,7 +307,7 @@ def _(dataset_ui, filter_files, mo, project_ui, read_file):
 def _(mo):
     mo.md(
         r"""
-    <br>
+    <hr>
     ### 2a. Select Regions (BED)
     """
     )
@@ -572,7 +572,7 @@ def _(
     # Let the user filter which windows are used for plotting
     mo.stop(windows is None)
     filter_windows_ui = mo.md("""
-    <br>
+    <hr>
     ### 3. Filter Windows
 
     Optionally select a subset of windows to display.
@@ -629,10 +629,11 @@ def _(filter_windows_ui, mo, pd, peak_group_cname_options, windows):
 
 
 @app.cell
-def _(mo):
+def _(filtered_windows, mo):
+    mo.stop(filtered_windows.shape[0] == 0)
     mo.md(
         r"""
-    <br>
+    <hr>
     ### 4. Select Genome Coverage Tracks
     """
     )
@@ -640,7 +641,8 @@ def _(mo):
 
 
 @app.cell
-def select_bigwigs(filter_files, mo):
+def select_bigwigs(filter_files, filtered_windows, mo):
+    mo.stop(filtered_windows.shape[0] == 0)
     # Ask the user to select one or more bigWig files
     bigwig_file_options = filter_files(suffix=(".bigwig", ".bw"))
     select_bigWigs = mo.ui.multiselect(
@@ -773,8 +775,9 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
+def _(mo, select_bigWigs):
     # The user must click a button to calculate genome coverage in those windows
+    mo.stop(len(select_bigWigs.value) == 0)
     calc_coverage_button = mo.ui.run_button(label="Compute Sequencing Depth per Sample")
     calc_coverage_button
     return (calc_coverage_button,)
@@ -823,16 +826,16 @@ def _(mo):
 
 @app.cell
 def sample_annot_ui(
-    filtered_windows,
+    filtered_window_dfs,
     get_sample_annot_dict,
     mo,
     select_bigWigs,
 ):
     # Let the user rename and group the wig files
-    mo.stop(filtered_windows is None)
+    mo.stop(len(filtered_window_dfs) == 0)
     sample_annot_ui = mo.md(
-        """<br>
-    ### 5. Dataset Names
+        """<hr>
+    ### 5. Tornado Plot
 
     Manually edit the display name used for each sample in the dataset.
 
@@ -840,17 +843,14 @@ def sample_annot_ui(
 
         """ +
         '\n'.join([
-            '\n'.join([
-                '{' + kw + '_' + str(sample_ix) + '}'
-                for kw in ['name']
-            ])
+            '{' + sample_name.replace("/", "_").replace(".", "_") + '}'
             for sample_ix, sample_name in enumerate(select_bigWigs.value)
         ])
     ).batch(**{
-        f"name_{sample_ix}": mo.ui.text(
+        sample_name.replace("/", "_").replace(".", "_"): mo.ui.text(
             label=sample_name,
             value=get_sample_annot_dict().get(
-                f"name_{sample_ix}",
+                sample_name.replace("/", "_").replace(".", "_"),
                 sample_name.split("/")[-1][:-len(".bigWig")]
             ),
             full_width=True
@@ -873,7 +873,7 @@ def _(filtered_window_dfs, mo, sample_annot_ui):
     # Apply labels for each selected wig file and merge replicates
     def _merge_window_data(filtered_window_dfs, wig_labels):
         # Make a list of the labels that were applied by the user
-        labels = [wig_labels[f"name_{ix}"] for ix in range(len(filtered_window_dfs))]
+        labels = [wig_labels[fn.replace("/", "_").replace(".", "_")] for fn in filtered_window_dfs]
 
         merged = {}
         for label in labels:
@@ -954,7 +954,7 @@ def _(
 
     params = mo.md("""
     <br>
-    ### 6. Plot Settings
+    ### Tornado Plot Settings
 
     - {max_val}
     - {heatmap_height}
