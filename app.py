@@ -1061,14 +1061,18 @@ def _(
 def _(filtered_windows, get_peak_groups, mo, params, set_peak_groups):
     # Select peak groups to display
     if params.value["cname_peak_groups"] != "None":
+        select_peaks_options = filtered_windows[params.value["cname_peak_groups"]].value_counts().index.values
+        select_peaks_value = [
+            n for n in get_peak_groups()
+            if n in select_peaks_options
+        ]
+        if len(select_peaks_value) == 0:
+            select_peaks_value = select_peaks_options
         select_peaks = mo.md("{groups}").batch(
             groups=mo.ui.multiselect(
                 label="Peak Groups:",
-                options=filtered_windows[params.value["cname_peak_groups"]].value_counts().index.values,
-                value=[
-                    n for n in get_peak_groups()
-                    if n in filtered_windows[params.value["cname_peak_groups"]].value_counts().index.values
-                ],
+                options=select_peaks_options,
+                value=select_peaks_value,
                 on_change=set_peak_groups
             )
         )
