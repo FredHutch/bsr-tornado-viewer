@@ -539,8 +539,9 @@ def _(
 
 
 @app.cell
-def _(make_windows_button, mo):
+def _(make_windows_button, mo, window_ui):
     mo.stop(make_windows_button.value)
+    window_ui.value
     mo.ui.button(label="Must Compute Windows to Continue", kind="warn")
     return
 
