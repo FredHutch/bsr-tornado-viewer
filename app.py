@@ -315,7 +315,36 @@ def _(mo):
 
 
 @app.cell
-def select_bed(filter_files, mo):
+def _(mo):
+    # Use a state element to get the BED file from somewhere
+    get_bed, set_bed = mo.state(None)
+    get_bed_cirro, set_bed_cirro = mo.state(None)
+    get_bed_local, set_bed_local = mo.state(None)
+    return (
+        get_bed,
+        get_bed_cirro,
+        get_bed_local,
+        set_bed,
+        set_bed_cirro,
+        set_bed_local,
+    )
+
+
+@app.cell
+def _(mo):
+    # The BED file can come either from the dataset, or uploaded directly
+    select_bed_source = mo.ui.dropdown(
+        label="BED file source:",
+        options=["Cirro", "Upload Directly"],
+        value="Cirro"
+    )
+    select_bed_source
+    return (select_bed_source,)
+
+
+@app.cell
+def select_bed(filter_files, mo, select_bed_source):
+    mo.stop(select_bed_source.value != "Cirro")
     # Ask the user to select a BED file
     bed_files = filter_files(suffix=("bed", 'narrowpeak', 'broadpeak', 'txt'))
 
@@ -328,52 +357,104 @@ def select_bed(filter_files, mo):
         else:
             "No BED Files Found"
 
-    select_bed = mo.ui.dropdown(
+    select_bed_cirro = mo.ui.dropdown(
         label="Select BED file:",
         options=bed_files if len(bed_files) > 0 else ["No BED Files Found"],
         value=pick_default_bed(bed_files)
     )
-    select_bed
-    return (select_bed,)
+    select_bed_cirro
+    return (select_bed_cirro,)
 
 
 @app.cell
-def read_bed_file(StringIO, lru_cache, mo, pd, read_file):
-    # Read in the BED file
+def _(StringIO, pd):
+    def parse_bed(txt) -> pd.DataFrame:
+        # If the first line is a comment, use that as the header
+        if txt[0] == '#':
+            df = (
+                pd.read_csv(StringIO(txt), sep="\t")
+                .rename(columns=lambda cname: cname[1:] if cname.startswith("#") else cname)
+           )
+        else:
+            df = (
+                pd.read_csv(StringIO(txt), sep="\t", header=None)
+                .rename(columns=lambda i: f"Column {i+1}")
+            )
+
+        # The first three columns are always the same
+        df = df.rename(columns=dict(zip(df.columns.values, ['chrom', 'start', 'end'])))
+
+        return df.fillna("None")
+
+    return (parse_bed,)
+
+
+@app.cell
+def read_bed_file(lru_cache, mo, parse_bed, pd, read_file):
+    # Read in the BED file from Cirro
     @lru_cache
-    def read_bed(project: str, dataset: str, file: str):
+    def read_bed(project: str, dataset: str, file: str) -> pd.DataFrame:
         with mo.status.spinner("Reading BED file..."):
             # Read the file as text
             txt = read_file(project, dataset, file)
-
-            # If the first line is a comment, use that as the header
-            if txt[0] == '#':
-                df = (
-                    pd.read_csv(StringIO(txt), sep="\t")
-                    .rename(columns=lambda cname: cname[1:] if cname.startswith("#") else cname)
-               )
-            else:
-                df = (
-                    pd.read_csv(StringIO(txt), sep="\t", header=None)
-                    .rename(columns=lambda i: f"Column {i+1}")
-                )
-
-            # The first three columns are always the same
-            df = df.rename(columns=dict(zip(df.columns.values, ['chrom', 'start', 'end'])))
-
-            return df.fillna("None")
+            return parse_bed(txt)
 
     return (read_bed,)
 
 
 @app.cell
-def _(dataset_ui, project_ui, read_bed, select_bed):
-    # Read the BED file
-    bed = read_bed(
-        project_ui.value,
-        dataset_ui.value,
-        select_bed.value
+def _(dataset_ui, project_ui, read_bed, select_bed_cirro, set_bed_cirro):
+    # Get the BED file from Cirro
+    set_bed_cirro(
+        read_bed(
+            project_ui.value,
+            dataset_ui.value,
+            select_bed_cirro.value
+        )
     )
+    return
+
+
+@app.cell
+def _(mo, select_bed_source):
+    # Get the BED file from the user
+    mo.stop(select_bed_source.value != "Upload Directly")
+    upload_bed = mo.ui.file(
+        label="Upload BED file",
+        kind="area",
+        multiple=False
+    )
+    upload_bed
+    return (upload_bed,)
+
+
+@app.cell
+def _(mo, parse_bed, set_bed_local, upload_bed):
+    mo.stop(len(upload_bed.value) == 0)
+    set_bed_local(
+        parse_bed(
+            upload_bed.value[0].contents.decode('utf-8')
+        )
+    )
+    return
+
+
+@app.cell
+def _(get_bed_cirro, get_bed_local, select_bed_source, set_bed):
+    if select_bed_source.value == "Upload Directly":
+        set_bed(get_bed_local())
+    else:
+        assert select_bed_source.value == "Cirro"
+        set_bed(get_bed_cirro())
+    return
+
+
+@app.cell
+def _(get_bed, mo):
+    # Read the BED file
+    bed = get_bed()
+    mo.stop(bed is None)
+
     # Find any columns which might contain strand information
     bed_strand_cols = [
         cname
@@ -382,7 +463,7 @@ def _(dataset_ui, project_ui, read_bed, select_bed):
         and cvals.nunique() > 1
         and len(set(cvals.unique()) - set([".", "+", "-"])) == 0
     ]
-    return (bed_strand_cols,)
+    return bed, bed_strand_cols
 
 
 @app.cell
@@ -430,17 +511,17 @@ def _(mo):
 
 @app.cell
 def window_ui(
+    get_bed,
     get_n_bins,
     get_ref,
     get_size,
     mo,
-    select_bed,
     set_n_bins,
     set_ref,
     set_size,
 ):
     # Get options for how the windows will be set up
-    mo.stop(select_bed.value is None)
+    mo.stop(get_bed() is None)
     window_ui = mo.md("""
     ### 2b. Set Window Size / Position
 
@@ -464,18 +545,16 @@ def window_ui(
 
 
 @app.cell
-def make_windows(lru_cache, np, read_bed):
+def make_windows(StringIO, lru_cache, np, pd):
     # Set up a table with the actual window coordinates
     @lru_cache
     def make_windows(
-        project: str,
-        dataset: str,
-        file: str,
+        bed_str: str,
         size: int,
         ref: str,
         bed_strand_col: str
     ):
-        bed = read_bed(project, dataset, file)
+        bed = pd.read_csv(StringIO(bed_str))
 
         # Make the offset based on the strandedness of the window
         if bed_strand_col == "None":
@@ -524,20 +603,16 @@ def _(mo):
 
 @app.cell
 def _(
+    bed,
     bed_strand_col_ui,
-    dataset_ui,
     make_windows,
     make_windows_button,
     mo,
-    project_ui,
-    select_bed,
     window_ui,
 ):
     mo.stop(make_windows_button.value is False)
     windows, window_msg = make_windows(
-        project_ui.value,
-        dataset_ui.value,
-        select_bed.value,
+        bed.to_csv(index=None),
         window_ui.value['size'],
         window_ui.value['ref'],
         bed_strand_col_ui.value.get("bed_strand_col", "None")
