@@ -1406,14 +1406,22 @@ def _(Axes, BytesIO, Dict, List, filtered_windows, pd, plt):
 
 
 @app.cell
-def _(max_val, mo):
+def _(mo):
+    # Preserve the state of the button below
+    get_autoplot_state, set_autoplot_state = mo.state("Automatically Update")
+    return get_autoplot_state, set_autoplot_state
+
+
+@app.cell
+def _(get_autoplot_state, max_val, mo, set_autoplot_state):
     # Add a radio button to let the user diable the plotting
     max_val
 
     autoplot_button = mo.ui.radio(
         label="Tornado Plot",
-        value="Automatically Update",
-        options=["Automatically Update", "Pause"]
+        value=get_autoplot_state(),
+        options=["Automatically Update", "Pause"],
+        on_change=set_autoplot_state
     )
     autoplot_button
     return (autoplot_button,)
