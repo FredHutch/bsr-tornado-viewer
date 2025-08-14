@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "cirro>=1.5.4",
+    "kaleido>=1.0.0",
     "marimo==0.14.13",
     "markdown==3.8.2",
     "matplotlib>=3.10.3",

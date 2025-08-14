@@ -1319,12 +1319,18 @@ def _(Axes, BytesIO, Dict, List, filtered_windows, pd, plt):
             axarr[0, i].legend(bbox_to_anchor=[1, 1], title=peak_group_legend_title)
 
         buf = BytesIO()
-        plt.savefig(buf, format="png")
+        plt.savefig(buf, format="png", bbox_inches="tight")
         buf.seek(0)
         png_data = buf.read()
         buf.close()
 
-        return fig, png_data
+        buf = BytesIO()
+        plt.savefig(buf, format="pdf", bbox_inches="tight")
+        buf.seek(0)
+        pdf_data = buf.read()
+        buf.close()
+
+        return fig, png_data, pdf_data
 
 
     def format_subplots(
@@ -1451,10 +1457,10 @@ def _(
         _plot_data = None
 
     if _plot_data is None:
-        fig, png_data = None, None
+        fig, png_data, pdf_data = None, None
     else:
-        fig, png_data = _plot_data
-    return fig, png_data
+        fig, png_data, pdf_data = _plot_data
+    return fig, pdf_data, png_data
 
 
 @app.cell
@@ -1464,16 +1470,23 @@ def _(fig):
 
 
 @app.cell
-def _(mo, png_data):
+def _(mo, pdf_data, png_data):
     if png_data is not None:
-        download_png_data = mo.download(
-            data=png_data,
-            filename="tornado_plot.png",
-            label="Save as PNG"
-        )
+        download_images = mo.hstack([
+            mo.download(
+                data=png_data,
+                filename="tornado_plot.png",
+                label="Save as PNG"
+            ),
+            mo.download(
+                data=pdf_data,
+                filename="tornado_plot.pdf",
+                label="Save as PDF"
+            )
+        ], justify="start")
     else:
-        download_png_data = mo.md("")
-    download_png_data
+        download_images = mo.md("")
+    download_images
     return
 
 
